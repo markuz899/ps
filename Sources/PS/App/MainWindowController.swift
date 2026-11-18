@@ -452,6 +452,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         activate(tab)
     }
 
+    /// Session restore of an untitled document from its backup: back in a tab, still unsaved.
+    @discardableResult
+    func restoreUntitled(_ content: LoadedContent, mode: EditorMode, backupID: String, language: Language?, in pane: Pane) -> Tab {
+        let document = Document(mode: mode, backupID: backupID)
+        document.apply(content)
+        if let language { document.setLanguage(language, manual: true) }
+        document.markModified()
+        return addTab(document, in: pane)
+    }
+
     /// Used by session restore.
     func appendPane() -> Pane {
         makePane(after: panes[panes.count - 1])
@@ -715,9 +725,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         return tabs.filter { seen.insert(ObjectIdentifier($0.document)).inserted }
     }
 
-    /// Asks about every dirty document in turn. Used by quit and window close.
-    func confirmCloseAll(_ completion: @escaping (Bool) -> Void) {
-        let dirty = uniqueDocumentTabs.filter { $0.document.isDirty }
+    /// Asks about every dirty document in turn. Used by quit and window close. On quit
+    /// untitled documents are skipped: they are kept as backups and come back next launch.
+    func confirmCloseAll(includeUntitled: Bool = true, _ completion: @escaping (Bool) -> Void) {
+        let dirty = uniqueDocumentTabs.filter { $0.document.isDirty && (includeUntitled || $0.document.url != nil) }
         func next(_ remaining: ArraySlice<Tab>) {
             guard let tab = remaining.first else {
                 completion(true)

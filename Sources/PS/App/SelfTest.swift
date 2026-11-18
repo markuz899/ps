@@ -597,11 +597,15 @@ enum SelfTest {
                 controller.activate(index)
                 tab.editor?.textView.setSelectedRange(NSRange(location: 120, length: 0))
             }
+            // An untitled document that was never saved: it must come back after relaunch.
+            controller.newCodeFile(nil)
+            controller.activeTab?.editor?.textView.insertText("draft never saved", replacementRange: NSRange(location: NSNotFound, length: 0))
+            if let tab = tab(named: "main.swift") { controller.activate(tab) }
             Session.save(controller)
             let state = (Prefs.defaults.dictionary(forKey: "session")?["windows"] as? [[String: Any]])?.first ?? [:]
             check((state["folder"] as? String) == workspace.standardizedFileURL.path, "session stores the folder")
             let saved = (state["panes"] as? [[String: Any]] ?? []).reduce(0) { $0 + (($1["tabs"] as? [Any])?.count ?? 0) }
-            check(saved == controller.tabs.filter { $0.document.url != nil }.count, "session stores every tab of every pane")
+            check(saved == controller.tabs.count, "session stores every tab of every pane, the untitled one too")
         }
     }
 
@@ -613,6 +617,9 @@ enum SelfTest {
             check(controller.folder?.standardizedFileURL.path == workspace.standardizedFileURL.path, "folder restored after relaunch")
             check(controller.tabs.count >= 6, "tabs restored after relaunch (\(controller.tabs.count))")
             check(controller.panes.count == 2, "both panes restored after relaunch")
+            let draft = controller.tabs.first { $0.document.url == nil }
+            check(draft?.document.textStorage.string == "draft never saved", "the unsaved new file comes back with its text")
+            check(draft?.document.isDirty == true, "and it is still marked as unsaved")
             check(controller.activeTab?.document.url?.lastPathComponent == "main.swift", "active tab restored")
             check(controller.activeTab?.editor?.textView.selectedRange().location == 120, "cursor position restored")
         }
