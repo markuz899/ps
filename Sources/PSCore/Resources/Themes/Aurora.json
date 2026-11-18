@@ -1,0 +1,34 @@
+{
+  "name": "Aurora",
+  "appearance": "dark",
+  "colors": {
+    "background": "#0E1320",
+    "foreground": "#E2E8F5",
+    "currentLine": "#151C2E",
+    "selection": "#264268",
+    "cursor": "#5EEAD4",
+    "gutter": "#0E1320",
+    "gutterText": "#3C4A66",
+    "gutterActive": "#5EEAD4",
+    "bracket": "#5EEAD4",
+    "findMatch": "#F472B655"
+  },
+  "scopes": {
+    "comment": "#56637F",
+    "string": "#5EEAD4",
+    "keyword": "#F472B6",
+    "type": "#A78BFA",
+    "number": "#FBBF24",
+    "function": "#60A5FA",
+    "constant": "#FB923C",
+    "attribute": "#A78BFA",
+    "variable": "#FDA4AF",
+    "tag": "#F472B6",
+    "property": "#60A5FA",
+    "preprocessor": "#A78BFA",
+    "heading": "#5EEAD4",
+    "emphasis": "#A78BFA",
+    "strong": "#F472B6",
+    "link": "#60A5FA"
+  }
+}

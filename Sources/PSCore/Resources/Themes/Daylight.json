@@ -1,0 +1,34 @@
+{
+  "name": "Daylight",
+  "appearance": "light",
+  "colors": {
+    "background": "#FFFFFF",
+    "foreground": "#24292F",
+    "currentLine": "#F3F6FA",
+    "selection": "#C8DCFF",
+    "cursor": "#3B5BDB",
+    "gutter": "#FAFBFC",
+    "gutterText": "#A0A7B1",
+    "gutterActive": "#3B4048",
+    "bracket": "#7C8CFF",
+    "findMatch": "#FFE16680"
+  },
+  "scopes": {
+    "comment": "#8A919C",
+    "string": "#0B7A55",
+    "keyword": "#C4267A",
+    "type": "#6F42C1",
+    "number": "#B35900",
+    "function": "#1F5FD1",
+    "constant": "#B35900",
+    "attribute": "#8250DF",
+    "variable": "#9A3412",
+    "tag": "#C4267A",
+    "property": "#1F5FD1",
+    "preprocessor": "#8250DF",
+    "heading": "#1F5FD1",
+    "emphasis": "#6F42C1",
+    "strong": "#C4267A",
+    "link": "#0B7A55"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "name": "Paper",
+  "appearance": "light",
+  "colors": {
+    "background": "#FBF8F1",
+    "foreground": "#3A3530",
+    "currentLine": "#F3EEE2",
+    "selection": "#E9DFC6",
+    "cursor": "#B4532A",
+    "gutter": "#FBF8F1",
+    "gutterText": "#BDB3A2",
+    "gutterActive": "#5C534A",
+    "bracket": "#B4532A",
+    "findMatch": "#F2C14E70"
+  },
+  "scopes": {
+    "comment": "#A09684",
+    "string": "#5F7A2C",
+    "keyword": "#B4532A",
+    "type": "#7A4E9E",
+    "number": "#AD6E00",
+    "function": "#2C6E8F",
+    "constant": "#AD6E00",
+    "attribute": "#7A4E9E",
+    "variable": "#9E3B3B",
+    "tag": "#B4532A",
+    "property": "#2C6E8F",
+    "preprocessor": "#7A4E9E",
+    "heading": "#B4532A",
+    "emphasis": "#7A4E9E",
+    "strong": "#B4532A",
+    "link": "#2C6E8F"
+  }
+}
