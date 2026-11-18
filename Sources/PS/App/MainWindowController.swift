@@ -149,7 +149,24 @@ final class PaneDropView: NSView {
 /// The main window: sidebar + one or more editor panes + status bar. Owns the tab model
 /// and every document-level command (menu items reach it through the responder chain or
 /// the app delegate).
-final class MainWindowController: NSWindowController, NSWindowDelegate, FileTreeDelegate, NSToolbarDelegate, NSSplitViewDelegate {
+/// The title bar: sidebar toggle at the left, title right after the sidebar.
+final class ToolbarProvider: NSObject, NSToolbarDelegate {
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace]
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarDefaultItemIdentifiers(toolbar)
+    }
+
+    /// Required by AppKit even when only system items are used: without it the delegate
+    /// is rejected ("does not implement all required methods") and the bar stays empty.
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        nil
+    }
+}
+
+final class MainWindowController: NSWindowController, NSWindowDelegate, FileTreeDelegate {
     static let maxPanes = 4
 
     private(set) var panes: [Pane] = []
@@ -175,6 +192,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
     private var preferenceSignature = Prefs.signature
     private var responderObservation: NSKeyValueObservation?
     private let isPrimary: Bool
+    private let toolbarProvider = ToolbarProvider()
 
     /// Every open tab, pane by pane.
     var tabs: [Tab] { panes.flatMap(\.tabs) }
@@ -236,6 +254,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
 
     private func buildLayout() {
         sidebar.tree.delegate = self
+        sidebar.onClose = { [weak self] in self?.setSidebarCollapsed(true) }
         sidebar.search.onOpen = { [weak self] match in
             self?.open(match.url) { tab in
                 if let tab { self?.select(match.range, in: tab) }
@@ -286,6 +305,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         sidebarItem.minimumThickness = 180
         sidebarItem.maximumThickness = 480
         sidebarItem.canCollapse = true
+        // Showing/hiding the sidebar resizes the editor, never the window.
+        sidebarItem.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
         let editorItem = NSSplitViewItem(viewController: editorArea)
         editorItem.titlebarSeparatorStyle = .line
         split.addSplitViewItem(sidebarItem)
@@ -304,18 +325,34 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
 
     private func buildToolbar() {
         let toolbar = NSToolbar(identifier: "PSToolbar")
-        toolbar.delegate = self
+        toolbar.delegate = toolbarProvider
         toolbar.displayMode = .iconOnly
         window?.toolbar = toolbar
         window?.toolbarStyle = .unified
     }
 
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace]
+    var isSidebarCollapsed: Bool {
+        split.splitViewItems.first?.isCollapsed ?? false
     }
 
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarDefaultItemIdentifiers(toolbar)
+    func setSidebarCollapsed(_ collapsed: Bool, animated: Bool = true) {
+        guard let item = split.splitViewItems.first, item.isCollapsed != collapsed else { return }
+        if animated {
+            item.animator().isCollapsed = collapsed
+        } else {
+            item.isCollapsed = collapsed
+        }
+        Session.save(self)
+    }
+
+    @objc func hideSidebar(_ sender: Any?) {
+        setSidebarCollapsed(true)
+    }
+
+    /// Handled here too (not only by the split view controller): with the focus in the
+    /// closed sidebar, the split view controller is no longer in the responder chain.
+    @objc func toggleSidebar(_ sender: Any?) {
+        setSidebarCollapsed(!isSidebarCollapsed)
     }
 
     fileprivate func fill(_ container: NSView, with view: NSView) {

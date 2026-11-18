@@ -127,14 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     // MARK: App commands
 
     @objc func showSettings(_ sender: Any?) {
-        if settingsWindow == nil {
-            let window = NSWindow(contentViewController: SettingsHost.make())
-            window.title = L("Settings")
-            window.styleMask = [.titled, .closable]
-            window.isReleasedWhenClosed = false
-            window.center()
-            settingsWindow = window
-        }
+        if settingsWindow == nil { settingsWindow = SettingsHost.makeWindow() }
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
