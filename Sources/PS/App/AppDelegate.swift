@@ -53,7 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        let dirty = controllers.filter { $0.tabs.contains { $0.document.isDirty } }
+        // Untitled documents don't need an answer: they are backed up and restored.
+        let dirty = controllers.filter { $0.tabs.contains { $0.document.isDirty && $0.document.url != nil } }
         guard !SelfTest.isActive, !dirty.isEmpty else { return .terminateNow }
         // One window after another, each asking about its own documents.
         func next(_ remaining: ArraySlice<MainWindowController>) {
@@ -62,7 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
                 return
             }
             window.window?.makeKeyAndOrderFront(nil)
-            window.confirmCloseAll { proceed in
+            window.confirmCloseAll(includeUntitled: false) { proceed in
                 proceed ? next(remaining.dropFirst()) : NSApp.reply(toApplicationShouldTerminate: false)
             }
         }

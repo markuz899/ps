@@ -36,19 +36,75 @@ enum Session {
     private static let modesKey = "modeOverrides"
     private static let languagesKey = "languageOverrides"
 
+    /// True while a session is being restored: saving then would store a half-restored
+    /// session and delete backups that haven't been read yet.
+    private static var restoring = false
+
     /// Saves every window (the argument only says "something changed").
     static func save(_ controller: MainWindowController?) {
         let windows = MainWindowController.all
         // Not registered yet (a window being built): don't overwrite the saved session.
-        guard !windows.isEmpty else { return }
+        guard !windows.isEmpty, !restoring else { return }
         Prefs.defaults.set(["windows": windows.map(state(of:))], forKey: key)
+        removeStaleBackups(keeping: Set(windows.flatMap(\.tabs).filter { $0.document.url == nil }.map(\.document.backupID)))
+    }
+
+    // MARK: Unsaved (untitled) documents
+
+    static var backupFolder: URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        // One folder per app identity: the cleanup of a development build must never
+        // touch the backups of the installed app.
+        let owner = Bundle.main.bundleIdentifier ?? "development"
+        return support.appendingPathComponent("PS/Unsaved/\(owner)", isDirectory: true)
+    }
+
+    private static func backupURL(for document: Document) -> URL {
+        let ext: String
+        switch document.mode {
+        case .code: ext = "txt"
+        case .rich: ext = "rtfd"
+        }
+        return backupFolder.appendingPathComponent(document.backupID).appendingPathExtension(ext)
+    }
+
+    /// Writes the untitled document's text if it changed since the last backup.
+    private static func backUp(_ document: Document) -> URL? {
+        let url = backupURL(for: document)
+        if document.backedUpVersion == document.version, FileManager.default.fileExists(atPath: url.path) { return url }
+        do {
+            try FileManager.default.createDirectory(at: backupFolder, withIntermediateDirectories: true)
+            switch document.mode {
+            case .code:
+                try SafeWriter.write(try TextFileIO.encode(document.textStorage.string, format: .standard), to: url)
+            case .rich:
+                try RichTextIO.write(NSAttributedString(attributedString: document.textStorage), to: url, kind: .rtfd)
+            }
+            document.backedUpVersion = document.version
+            return url
+        } catch {
+            return nil
+        }
+    }
+
+    private static func removeStaleBackups(keeping ids: Set<String>) {
+        let files = (try? FileManager.default.contentsOfDirectory(at: backupFolder, includingPropertiesForKeys: nil)) ?? []
+        for file in files where !ids.contains(file.deletingPathExtension().lastPathComponent) {
+            try? FileManager.default.removeItem(at: file)
+        }
     }
 
     private static func state(of controller: MainWindowController) -> [String: Any] {
         let panes: [[String: Any]] = controller.panes.map { pane in
             let tabs: [[String: Any]] = pane.tabs.compactMap { tab in
-                guard let url = tab.document.url else { return nil }
-                return ["path": url.path, "cursor": tab.editor?.textView.selectedRange().location ?? 0]
+                let cursor = tab.editor?.textView.selectedRange().location ?? 0
+                let document = tab.document
+                guard let url = document.url else {
+                    // Empty untitled tabs aren't worth bringing back.
+                    guard document.textStorage.length > 0, backUp(document) != nil else { return nil }
+                    return ["untitled": document.backupID, "mode": document.mode.rawValue, "language": document.language.id, "cursor": cursor]
+                }
+                return ["path": url.path, "cursor": cursor]
             }
             return ["tabs": tabs, "active": pane.activeTab?.document.url?.path ?? ""]
         }
@@ -70,8 +126,11 @@ enum Session {
         }
         // Older sessions held one window at the top level.
         let windows = saved["windows"] as? [[String: Any]] ?? [saved]
+        restoring = true
         func next(_ index: Int) {
             guard index < windows.count else {
+                restoring = false
+                save(controller)
                 completion()
                 return
             }
@@ -93,8 +152,11 @@ enum Session {
         // Older sessions had a single "tabs" list.
         let saved = state["panes"] as? [[String: Any]] ?? [["tabs": state["tabs"] ?? [], "active": state["active"] ?? ""]]
         let panes = saved.map { pane -> (tabs: [[String: Any]], active: String) in
-            let tabs = (pane["tabs"] as? [[String: Any]] ?? []).filter {
-                FileManager.default.fileExists(atPath: $0["path"] as? String ?? "")
+            let tabs = (pane["tabs"] as? [[String: Any]] ?? []).filter { entry in
+                if let id = entry["untitled"] as? String {
+                    return backupFile(id) != nil
+                }
+                return FileManager.default.fileExists(atPath: entry["path"] as? String ?? "")
             }
             return (tabs, pane["active"] as? String ?? "")
         }.filter { !$0.tabs.isEmpty }
@@ -111,8 +173,23 @@ enum Session {
             }
             let pane = index == 0 ? controller.panes[0] : controller.appendPane()
             func next(_ remaining: ArraySlice<[String: Any]>) {
-                guard let entry = remaining.first, let path = entry["path"] as? String else {
+                guard let entry = remaining.first else {
                     openPane(index + 1)
+                    return
+                }
+                if let id = entry["untitled"] as? String, let file = backupFile(id),
+                   let mode = EditorMode(rawValue: entry["mode"] as? String ?? ""),
+                   let content = try? Document.read(file, mode: mode) {
+                    let language = (entry["language"] as? String).flatMap(LanguageRegistry.language(id:))
+                    let tab = controller.restoreUntitled(content, mode: mode, backupID: id, language: mode == .code ? language : nil, in: pane)
+                    if let view = tab.editor?.textView, let cursor = entry["cursor"] as? Int {
+                        view.setSelectedRange(NSRange(location: min(cursor, (view.string as NSString).length), length: 0))
+                    }
+                    next(remaining.dropFirst())
+                    return
+                }
+                guard let path = entry["path"] as? String else {
+                    next(remaining.dropFirst())
                     return
                 }
                 controller.open(URL(fileURLWithPath: path), in: pane) { tab in
@@ -133,6 +210,14 @@ enum Session {
             next(panes[index].tabs[...])
         }
         openPane(0)
+    }
+
+    private static func backupFile(_ id: String) -> URL? {
+        for ext in ["txt", "rtfd", "excalidraw"] {
+            let url = backupFolder.appendingPathComponent(id).appendingPathExtension(ext)
+            if FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        return nil
     }
 
     static func modeOverride(for url: URL) -> EditorMode? {

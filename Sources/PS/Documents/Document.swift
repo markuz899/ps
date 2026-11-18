@@ -52,9 +52,15 @@ final class Document: NSObject, NSTextStorageDelegate {
     /// Edits after the layout managers processed them: (edited range, change in length).
     var editObservers: [(NSRange, Int) -> Void] = []
 
-    init(mode: EditorMode, url: URL? = nil) {
+    /// Stable name of this untitled document's backup in the Unsaved folder.
+    let backupID: String
+    /// Version last written to the backup (avoids rewriting unchanged backups).
+    var backedUpVersion = -1
+
+    init(mode: EditorMode, url: URL? = nil, backupID: String? = nil) {
         self.mode = mode
         self.url = url
+        self.backupID = backupID ?? UUID().uuidString
         if url == nil {
             Document.untitledCount += 1
             untitledNumber = Document.untitledCount
@@ -172,6 +178,11 @@ final class Document: NSObject, NSTextStorageDelegate {
     func userDidEdit() {
         // Undoing back to the saved text clears the dot, as in VS Code. Formatting changes
         // don't alter the string, so rich documents (and huge files) just stay dirty.
+        // Untitled: "modified" means "has something worth keeping".
+        if url == nil {
+            setDirty(textStorage.length > 0)
+            return
+        }
         if mode == .code, let saved = savedText {
             let current = textStorage.mutableString
             setDirty(saved.length != current.length || saved.compare(current as String, options: .literal) != .orderedSame)
