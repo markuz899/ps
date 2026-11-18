@@ -6,6 +6,16 @@ protocol TabBarDelegate: AnyObject {
     func tabBar(_ bar: TabBar, close index: Int)
     func tabBar(_ bar: TabBar, move from: Int, to: Int)
     func tabBar(_ bar: TabBar, menuFor index: Int) -> NSMenu
+    /// A tab dragged out of its bar: the delegate remembers which one.
+    func tabBar(_ bar: TabBar, beginDraggingTabAt index: Int)
+    /// A dragged tab dropped on this bar, before the tab at `index`.
+    func tabBar(_ bar: TabBar, acceptDropAt index: Int) -> Bool
+    /// The drag ended outside every window of the app.
+    func tabBar(_ bar: TabBar, draggedOutsideTo screenPoint: NSPoint)
+}
+
+extension NSPasteboard.PasteboardType {
+    static let psTab = NSPasteboard.PasteboardType("app.ps.tab")
 }
 
 /// Icon and tint per language / mode, shared by tabs, the file tree and Quick Open.
@@ -56,13 +66,16 @@ struct TabInfo {
 
 /// VS Code-style tab strip: dirty dot that turns into a close button on hover, middle-click
 /// close, context menu, and drag-to-reorder where the other tabs slide out of the way.
-final class TabBar: NSView {
+final class TabBar: NSView, NSDraggingSource {
     weak var delegate: TabBarDelegate?
     private let scrollView = NSScrollView()
     private let content = FlippedView()
     private var items: [TabItemView] = []
     private(set) var selectedIndex = -1
     private var dragging: (item: TabItemView, offset: CGFloat, startIndex: Int)?
+    private let dropIndicator = NSView()
+    /// Kept alive until the session ends: the drop may remove this bar's pane.
+    private static var activeSource: TabBar?
     /// With several panes, only the focused one shows the accent colour.
     var isActivePane = true {
         didSet { items.forEach { $0.refreshAppearance() } }
@@ -86,6 +99,12 @@ final class TabBar: NSView {
             scrollView.topAnchor.constraint(equalTo: topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        dropIndicator.wantsLayer = true
+        dropIndicator.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        dropIndicator.layer?.cornerRadius = 1.5
+        dropIndicator.isHidden = true
+        content.addSubview(dropIndicator)
+        registerForDraggedTypes([.psTab])
         setAccessibilityElement(true)
         setAccessibilityRole(.tabGroup)
         setAccessibilityLabel(L("Open files"))
@@ -163,8 +182,14 @@ final class TabBar: NSView {
         item.isDragging = true
     }
 
-    fileprivate func continueDrag(at point: NSPoint) {
+    fileprivate func continueDrag(at point: NSPoint, event: NSEvent) {
         guard let drag = dragging, let current = index(of: drag.item) else { return }
+        // Pulled well above or below the bar: becomes a real drag (other panes, other windows).
+        let local = convert(event.locationInWindow, from: nil)
+        if local.y < -24 || local.y > bounds.height + 24 {
+            beginExternalDrag(drag.item, event: event)
+            return
+        }
         let x = min(max(0, point.x - drag.offset), content.frame.width - drag.item.frame.width)
         drag.item.setFrameOrigin(NSPoint(x: x, y: 0))
         let center = x + drag.item.frame.width / 2
@@ -198,6 +223,76 @@ final class TabBar: NSView {
         if let index = index(of: drag.item), index != drag.startIndex {
             delegate?.tabBar(self, move: drag.startIndex, to: index)
         }
+    }
+
+    // MARK: Drag between panes and windows
+
+    private func beginExternalDrag(_ item: TabItemView, event: NSEvent) {
+        guard let drag = dragging else { return }
+        // Undo the live reordering: the tab goes back where it was while it travels.
+        if let current = index(of: item), current != drag.startIndex {
+            items.remove(at: current)
+            items.insert(item, at: drag.startIndex)
+        }
+        dragging = nil
+        item.isDragging = false
+        item.layer?.zPosition = 0
+        layoutItems(animated: false)
+        guard let index = index(of: item) else { return }
+        delegate?.tabBar(self, beginDraggingTabAt: index)
+
+        let pasteboardItem = NSPasteboardItem()
+        pasteboardItem.setString("\(index)", forType: .psTab)
+        let draggingItem = NSDraggingItem(pasteboardWriter: pasteboardItem)
+        draggingItem.setDraggingFrame(item.bounds, contents: item.snapshot())
+        TabBar.activeSource = self
+        item.beginDraggingSession(with: [draggingItem], event: event, source: self)
+    }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        .move
+    }
+
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        defer { TabBar.activeSource = nil }
+        guard operation.isEmpty else { return }
+        // Dropped on nothing: only "outside the app" counts as tearing the tab off.
+        let insideApp = NSApp.windows.contains { $0.isVisible && $0.frame.contains(screenPoint) }
+        if !insideApp { delegate?.tabBar(self, draggedOutsideTo: screenPoint) }
+    }
+
+    private func dropIndex(for info: NSDraggingInfo) -> Int {
+        let x = content.convert(info.draggingLocation, from: nil).x
+        return items.filter { $0.frame.midX < x }.count
+    }
+
+    private func showIndicator(at index: Int) {
+        let x = index < items.count ? items[index].frame.minX : (items.last?.frame.maxX ?? 0)
+        dropIndicator.frame = NSRect(x: max(0, x - 1.5), y: 4, width: 3, height: TabBar.height - 9)
+        dropIndicator.isHidden = false
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        draggingUpdated(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard sender.draggingPasteboard.types?.contains(.psTab) == true else { return [] }
+        showIndicator(at: dropIndex(for: sender))
+        return .move
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        dropIndicator.isHidden = true
+    }
+
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        dropIndicator.isHidden = true
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        dropIndicator.isHidden = true
+        return delegate?.tabBar(self, acceptDropAt: dropIndex(for: sender)) ?? false
     }
 
     fileprivate func pointInContent(_ event: NSEvent) -> NSPoint {
@@ -311,6 +406,16 @@ final class TabItemView: NSView {
 
     override var isFlipped: Bool { true }
 
+    /// Picture of the tab used while it's dragged.
+    func snapshot() -> NSImage {
+        let image = NSImage(size: bounds.size)
+        if let bitmap = bitmapImageRepForCachingDisplay(in: bounds) {
+            cacheDisplay(in: bounds, to: bitmap)
+            image.addRepresentation(bitmap)
+        }
+        return image
+    }
+
     override func mouseEntered(with event: NSEvent) { hovering = true }
     override func mouseExited(with event: NSEvent) { hovering = false }
 
@@ -326,7 +431,7 @@ final class TabItemView: NSView {
             bar.beginDrag(self, at: start)
             mouseDownPoint = nil
         }
-        bar.continueDrag(at: point)
+        bar.continueDrag(at: point, event: event)
     }
 
     override func mouseUp(with event: NSEvent) {

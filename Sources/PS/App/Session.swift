@@ -36,8 +36,15 @@ enum Session {
     private static let modesKey = "modeOverrides"
     private static let languagesKey = "languageOverrides"
 
+    /// Saves every window (the argument only says "something changed").
     static func save(_ controller: MainWindowController?) {
-        guard let controller else { return }
+        let windows = MainWindowController.all
+        // Not registered yet (a window being built): don't overwrite the saved session.
+        guard !windows.isEmpty else { return }
+        Prefs.defaults.set(["windows": windows.map(state(of:))], forKey: key)
+    }
+
+    private static func state(of controller: MainWindowController) -> [String: Any] {
         let panes: [[String: Any]] = controller.panes.map { pane in
             let tabs: [[String: Any]] = pane.tabs.compactMap { tab in
                 guard let url = tab.document.url else { return nil }
@@ -50,14 +57,34 @@ enum Session {
             "activePane": controller.panes.firstIndex { $0 === controller.activePane } ?? 0,
         ]
         if let folder = controller.folder { state["folder"] = folder.path }
-        Prefs.defaults.set(state, forKey: key)
+        if let frame = controller.window?.frame { state["frame"] = NSStringFromRect(frame) }
+        return state
     }
 
+    /// The first saved window goes into `controller`; any others get new windows.
     static func restore(into controller: MainWindowController, completion: @escaping () -> Void) {
-        guard let state = Prefs.defaults.dictionary(forKey: key) else {
+        guard let saved = Prefs.defaults.dictionary(forKey: key) else {
             completion()
             return
         }
+        // Older sessions held one window at the top level.
+        let windows = saved["windows"] as? [[String: Any]] ?? [saved]
+        func next(_ index: Int) {
+            guard index < windows.count else {
+                completion()
+                return
+            }
+            var target = controller
+            if index > 0, let delegate = NSApp.delegate as? AppDelegate {
+                target = delegate.newWindow(cascadingFrom: controller)
+                if let frame = windows[index]["frame"] as? String { target.window?.setFrame(NSRectFromString(frame), display: false) }
+            }
+            restoreWindow(windows[index], into: target) { next(index + 1) }
+        }
+        next(0)
+    }
+
+    private static func restoreWindow(_ state: [String: Any], into controller: MainWindowController, completion: @escaping () -> Void) {
         if let folder = state["folder"] as? String, FileManager.default.fileExists(atPath: folder) {
             controller.openWorkspace(URL(fileURLWithPath: folder))
         }
