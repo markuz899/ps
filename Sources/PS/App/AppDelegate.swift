@@ -2,7 +2,14 @@ import AppKit
 import PSCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemValidation {
-    private(set) var controller: MainWindowController!
+    private(set) var controllers: [MainWindowController] = []
+
+    /// The window commands go to: the frontmost editor window.
+    var controller: MainWindowController! {
+        (NSApp.keyWindow?.windowController as? MainWindowController)
+            ?? (NSApp.mainWindow?.windowController as? MainWindowController)
+            ?? controllers.first
+    }
     private var settingsWindow: NSWindow?
     private var pendingOpen: [URL] = []
     private var launched = false
@@ -14,8 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        controller = MainWindowController()
-        controller.showWindow(nil)
+        let first = MainWindowController()
+        controllers = [first]
+        first.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         launched = true
 
@@ -45,11 +53,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let controller, !SelfTest.isActive, controller.tabs.contains(where: { $0.document.isDirty }) else { return .terminateNow }
-        controller.confirmCloseAll { proceed in
-            NSApp.reply(toApplicationShouldTerminate: proceed)
+        let dirty = controllers.filter { $0.tabs.contains { $0.document.isDirty } }
+        guard !SelfTest.isActive, !dirty.isEmpty else { return .terminateNow }
+        // One window after another, each asking about its own documents.
+        func next(_ remaining: ArraySlice<MainWindowController>) {
+            guard let window = remaining.first else {
+                NSApp.reply(toApplicationShouldTerminate: true)
+                return
+            }
+            window.window?.makeKeyAndOrderFront(nil)
+            window.confirmCloseAll { proceed in
+                proceed ? next(remaining.dropFirst()) : NSApp.reply(toApplicationShouldTerminate: false)
+            }
         }
+        next(dirty[...])
         return .terminateLater
+    }
+
+    func newWindow(cascadingFrom source: MainWindowController?) -> MainWindowController {
+        let window = MainWindowController(primary: false)
+        controllers.append(window)
+        if let frame = source?.window?.frame ?? controller?.window?.frame {
+            window.window?.setFrame(frame.offsetBy(dx: 28, dy: -28), display: false)
+        }
+        window.showWindow(nil)
+        return window
+    }
+
+    func remove(_ window: MainWindowController) {
+        controllers.removeAll { $0 === window }
+    }
+
+    @objc func newEditorWindow(_ sender: Any?) {
+        _ = newWindow(cascadingFrom: controller)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -328,6 +364,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         var windowItems: [NSMenuItem] = [
             item(L("Minimize"), #selector(NSWindow.performMiniaturize(_:)), "m"),
             item(L("Zoom"), #selector(NSWindow.performZoom(_:))),
+            item(L("New Window"), #selector(newEditorWindow(_:)), "n", [.command, .option]),
             .separator(),
             item(L("Next Tab"), #selector(W.selectNextTab(_:)), "\t", [.control]),
             item(L("Previous Tab"), #selector(W.selectPreviousTab(_:)), "\t", [.control, .shift]),

@@ -36,6 +36,15 @@ enum SelfTest {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: runNext)
     }
 
+    /// A screenshot of another window (e.g. a torn-off tab's window).
+    static func captureWindow(_ other: MainWindowController, as name: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            guard let window = other.window, let shots,
+                  let image = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(window.windowNumber), [.boundsIgnoreFraming]) else { return }
+            try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: shots.appendingPathComponent(name + ".png"))
+        }
+    }
+
     /// Captured a moment later, once the window server has the new frame.
     static func screenshot(_ name: String) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { capture(name) }
@@ -468,6 +477,58 @@ enum SelfTest {
             try? data?.write(to: shots.appendingPathComponent("16-code-image.png"))
         }
 
+        // Dragging tabs: between panes (tab bar and editor area), then out of the window.
+        step("drag between panes") {
+            guard controller.panes.count == 2, let python = tab(named: "app.py") else {
+                check(false, "two panes before the drag tests")
+                return
+            }
+            TabDrag.tab = python
+            let target = controller.panes[0]
+            check(controller.acceptDraggedTab(into: target, at: 0), "dropping app.py on the first pane's tab bar is accepted")
+            check(target.tabs.first === python && python.pane === target, "app.py is now the first tab of the first pane")
+            TabDrag.tab = python
+            check(target.container.onDrop?() == true, "dropping on a pane's editor area is accepted too")
+        }
+        step("drag to the other pane's editor") {
+            guard let python = tab(named: "app.py"), let other = controller.panes.last, other !== python.pane else { return }
+            TabDrag.tab = python
+            check(other.container.onDrop?() == true && python.pane === other, "dropping app.py on the other pane's editor moves it there")
+            screenshot("17-dragged-tab")
+        }
+        step("tear off") {
+            guard let css = tab(named: "style.css") else { return }
+            let document = css.document
+            let point = NSPoint(x: (controller.window?.frame.minX ?? 0) + 260, y: (controller.window?.frame.maxY ?? 800) - 120)
+            controller.tearOff(css, at: point)
+            let windows = MainWindowController.all
+            check(windows.count == 2, "dragging a tab out of the app opens a second window")
+            let second = windows.last
+            check(second?.tabs.count == 1 && second?.tabs.first?.document === document, "the new window holds that tab, same document")
+            check(!controller.tabs.contains { $0.document === document }, "the tab left the first window")
+            check(second?.folder?.standardizedFileURL.path == workspace.standardizedFileURL.path, "the new window opens the same folder")
+            check((second?.tabs.first?.editor?.textView.window) === second?.window, "its editor now lives in the new window")
+        }
+        step("tear off shot") {
+            if let second = MainWindowController.all.last, second !== controller {
+                captureWindow(second, as: "18-new-window")
+            }
+        }
+        step("no duplicates across windows") {
+            guard let second = MainWindowController.all.last, second !== controller else { return }
+            let before = controller.tabs.count
+            controller.open(src.appendingPathComponent("style.css"))
+            check(controller.tabs.count == before, "opening style.css again doesn't duplicate it in the first window")
+            check(second.window?.isKeyWindow == true || NSApp.keyWindow === second.window, "the window that has it comes forward")
+            // Back: drag the tab from the second window into the first; the empty window closes.
+            TabDrag.tab = second.tabs.first
+            controller.acceptDraggedTab(into: controller.panes[0], at: nil)
+        }
+        step("window closed") {
+            check(MainWindowController.all.count == 1, "a window left with no tabs closes by itself")
+            check(tab(named: "style.css")?.pane?.owner === controller, "style.css is back in the first window")
+        }
+
         // External change to a clean tab: silent reload (FSEvents).
         step("external change") {
             try? Data("/* changed elsewhere */\n.card { color: red; }\n".utf8).write(to: src.appendingPathComponent("style.css"), options: .atomic)
@@ -507,7 +568,7 @@ enum SelfTest {
                 tab.editor?.textView.setSelectedRange(NSRange(location: 120, length: 0))
             }
             Session.save(controller)
-            let state = Prefs.defaults.dictionary(forKey: "session") ?? [:]
+            let state = (Prefs.defaults.dictionary(forKey: "session")?["windows"] as? [[String: Any]])?.first ?? [:]
             check((state["folder"] as? String) == workspace.standardizedFileURL.path, "session stores the folder")
             let saved = (state["panes"] as? [[String: Any]] ?? []).reduce(0) { $0 + (($1["tabs"] as? [Any])?.count ?? 0) }
             check(saved == controller.tabs.filter { $0.document.url != nil }.count, "session stores every tab of every pane")

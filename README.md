@@ -33,6 +33,8 @@ Test modes built into the binary (used for the report):
 | Feature | How |
 |---|---|
 | **Split panes** (up to 4) | ⌘\ or the tab's context menu "Split Right". Each pane has its own tabs; the same file can be open in two panes (one document, two views). "Move to New Pane / to Pane N", drag the divider to resize it (double-click = equal widths), ⌃⌘← / ⌃⌘→ to switch pane. Panes are restored on relaunch. |
+| **Dragging tabs** | Drag a tab vertically out of its bar: you can drop it on another pane's tab bar (an indicator shows where it lands) or on a pane's editor (it gets highlighted). Dropped **outside the app**, it opens a new window at that spot, with the same folder. A window left with no tabs closes itself; with a single tab, the drag just moves the window. Also from the tab's menu: "Move to New Window". |
+| **Multiple windows** | ⌥⌘N opens a new window. A file is never open in two windows: opening it again brings forward the window that already has it. On quit each window asks about its own documents; the session saves and restores every window. |
 | **Command Palette** | ⇧⌘P: every menu command, searchable with fuzzy matching, with its shortcut. |
 | **Focus mode** | ⇧⌘↩: sidebar, toolbar, tabs and bars go away; only the pane you're in stays. In documents, everything except the current paragraph is dimmed and the line stays centred (typewriter scrolling). |
 | **Markdown preview** | ⇧⌘V on a `.md` file: rendered preview on the side (Foundation's parser, no WebView), with synced scrolling. The `.md` file stays code. |
@@ -103,7 +105,7 @@ To add a theme: one JSON file in `Themes/` (or in the user folder).
 | Next/previous tab · Tab N (⌘9 = last) | ⌃⇥ / ⌃⇧⇥ · ⌘1…⌘9 |
 | Find · Find and replace · Next/previous · Use selection | ⌘F · ⌥⌘F · ⌘G / ⇧⌘G · ⌘E |
 | Find in folder · Explorer · Toggle sidebar | ⇧⌘F · ⇧⌘E · ⌃⌘S |
-| Command Palette | ⇧⌘P |
+| Command Palette · New window | ⇧⌘P · ⌥⌘N |
 | Split editor · Next/previous pane | ⌘\ · ⌃⌘→ / ⌃⌘← |
 | Focus mode · Markdown preview | ⇧⌘↩ · ⇧⌘V |
 | Multiple cursors: next occurrence · caret above/below · add caret | ⌘D · ⌥⌘↑ / ⌥⌘↓ · ⌥click |
@@ -148,7 +150,7 @@ single cause.
 ### Acceptance criteria
 
 "Verified" = checked by running the app (`--selftest` + `--selftest-restore`, real windows and
-files, 85 checks, all passed, plus 30 unit tests). "Deduced" = from the code only, not run.
+files, 98 checks, all passed, plus 30 unit tests). "Deduced" = from the code only, not run.
 
 | Criterion | Outcome |
 |---|---|
@@ -169,7 +171,10 @@ its size, the same file in two panes (typing in one shows up and gets coloured i
 moving tabs between panes, closing a pane, breadcrumb `main.swift › Greeter › greet`, ⌘D
 twice → 3 selections replaced by typing and restored with one undo, the CSS swatch rewritten
 as `#ff0000` from the colour panel, replace in folder on disk, Markdown preview, a Command
-Palette command run, focus mode (one pane only, then all of them back), a PNG of the code.
+Palette command run, focus mode (one pane only, then all of them back), a PNG of the code;
+moving a tab via drop on the tab bar and on another pane's editor, tearing a tab off into a
+new window (same document, same folder, editor moved to the new window), no duplicate when
+reopening it from the other window, and the emptied window closing by itself.
 
 Also verified: silent reload of a file changed on disk (FSEvents), incremental highlighting
 (typing `/*` turns the following lines into a comment, undo restores them and clears the dirty
@@ -202,7 +207,10 @@ dot), Italian interface and light mode.
 - **Minimap**: not implemented.
 - **Multiple cursors**: ↑/↓ and the other movements (Home/End, words) go back to a single
   caret; auto-closing of brackets doesn't apply with several carets.
-- **Panes**: tabs move between panes from the menu, not by dragging between tab bars.
+- **Drag and drop of tabs**: the self-test exercises the drop logic directly; a real
+  mouse drag (the start of the drag session, the indicator) was not automated.
+- **Multiple windows**: restoring a session with more than one window is in the code but was
+  not verified (the self-test's session ends with one window).
 - **Tables**: only the system "Insert Table…" panel (`orderFrontTablePanel`), not tested.
 - **Untitled tabs** are not restored with the session.
 - **VoiceOver**: labels and roles set on tabs, file tree, formatting bar, find bar and status

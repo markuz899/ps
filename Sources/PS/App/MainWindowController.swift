@@ -24,7 +24,7 @@ final class Pane: NSObject, TabBarDelegate {
     let breadcrumb = BreadcrumbBar()
     let formatBar = FormatBar()
     let findBar = FindBar()
-    let container = NSView()
+    let container = PaneDropView()
 
     var activeTab: Tab? { tabs.indices.contains(activeIndex) ? tabs[activeIndex] : nil }
 
@@ -44,6 +44,10 @@ final class Pane: NSObject, TabBarDelegate {
             view.window?.makeFirstResponder(view)
         }
         breadcrumb.onReveal = { [weak owner] url in owner?.revealInSidebar(url) }
+        container.onDrop = { [weak self] in
+            guard let self else { return false }
+            return self.owner.acceptDraggedTab(into: self, at: nil)
+        }
         findBar.isHidden = true
         findBar.onClose = { [weak self] in self?.findBar.hide() }
         formatBar.isHidden = true
@@ -71,12 +75,74 @@ final class Pane: NSObject, TabBarDelegate {
     func tabBar(_ bar: TabBar, close index: Int) { owner.closeTab(tabs[index]) }
     func tabBar(_ bar: TabBar, menuFor index: Int) -> NSMenu { owner.tabMenu(for: tabs[index]) }
 
+    func tabBar(_ bar: TabBar, beginDraggingTabAt index: Int) {
+        TabDrag.tab = tabs[index]
+    }
+
+    func tabBar(_ bar: TabBar, acceptDropAt index: Int) -> Bool {
+        owner.acceptDraggedTab(into: self, at: index)
+    }
+
+    func tabBar(_ bar: TabBar, draggedOutsideTo screenPoint: NSPoint) {
+        if let tab = TabDrag.tab { owner.tearOff(tab, at: screenPoint) }
+        TabDrag.tab = nil
+    }
+
     func tabBar(_ bar: TabBar, move from: Int, to: Int) {
         let active = activeTab
         let tab = tabs.remove(at: from)
         tabs.insert(tab, at: to)
         activeIndex = tabs.firstIndex { $0 === active } ?? to
         owner.paneTabsChanged(self)
+    }
+}
+
+/// The tab being dragged (between panes or windows of this app).
+enum TabDrag {
+    static var tab: Tab?
+}
+
+/// A pane's editor area: accepts a dragged tab, with a soft highlight while hovering.
+final class PaneDropView: NSView {
+    var onDrop: (() -> Bool)?
+    private let highlight = NSView()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        registerForDraggedTypes([.psTab])
+        highlight.wantsLayer = true
+        highlight.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
+        highlight.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.6).cgColor
+        highlight.layer?.borderWidth = 2
+        highlight.layer?.cornerRadius = 6
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
+    }
+
+    private func setHighlighted(_ on: Bool) {
+        if on {
+            highlight.frame = bounds.insetBy(dx: 6, dy: 6)
+            highlight.autoresizingMask = [.width, .height]
+            addSubview(highlight, positioned: .above, relativeTo: nil)
+        } else {
+            highlight.removeFromSuperview()
+        }
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard sender.draggingPasteboard.types?.contains(.psTab) == true else { return [] }
+        setHighlighted(true)
+        return .move
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) { setHighlighted(false) }
+    override func draggingEnded(_ sender: NSDraggingInfo) { setHighlighted(false) }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        setHighlighted(false)
+        return onDrop?() ?? false
     }
 }
 
@@ -108,6 +174,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
     private var countWork: DispatchWorkItem?
     private var preferenceSignature = Prefs.signature
     private var responderObservation: NSKeyValueObservation?
+    private let isPrimary: Bool
 
     /// Every open tab, pane by pane.
     var tabs: [Tab] { panes.flatMap(\.tabs) }
@@ -115,7 +182,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
     var formatBar: FormatBar { activePane.formatBar }
     var findBar: FindBar { activePane.findBar }
 
-    init() {
+    /// Every open window's controller (registered by the app delegate).
+    static var all: [MainWindowController] {
+        (NSApp.delegate as? AppDelegate)?.controllers ?? []
+    }
+
+    /// `primary`: the first window, whose frame is remembered between launches.
+    init(primary: Bool = true) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -124,9 +197,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         )
         window.minSize = NSSize(width: 640, height: 400)
         window.titlebarSeparatorStyle = .line
-        window.setFrameAutosaveName("PSMainWindow")
+        window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
-        if !window.setFrameUsingName("PSMainWindow") { window.center() }
+        if primary {
+            window.setFrameAutosaveName("PSMainWindow")
+            if !window.setFrameUsingName("PSMainWindow") { window.center() }
+        }
+        isPrimary = primary
         super.init(window: window)
         window.delegate = self
         buildLayout()
@@ -216,7 +293,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         split.splitView.autosaveName = "PSSplit"
         contentViewController = split
         window?.setContentSize(NSSize(width: 1180, height: 760))
-        if !(window?.setFrameUsingName("PSMainWindow") ?? false) { window?.center() }
+        if isPrimary, !(window?.setFrameUsingName("PSMainWindow") ?? false) { window?.center() }
 
         let first = Pane(owner: self)
         panes = [first]
@@ -636,6 +713,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         for (index, pane) in panes.enumerated() where pane !== tab.pane {
             item(L("Move to Pane %d", index + 1)) { [weak self] in self?.move(tab, to: pane) }
         }
+        item(L("Move to New Window"), enabled: tabs.count > 1) { [weak self] in self?.tearOff(tab, at: nil) }
         if let url = tab.document.url {
             menu.addItem(.separator())
             item(L("Reveal in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
@@ -675,6 +753,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
             return
         }
         let key = url.resolvingSymlinksInPath().path
+        // Already open in another window: bring that one forward instead of a second copy.
+        for other in MainWindowController.all where other !== self {
+            if let tab = other.tabs.first(where: { $0.document.url?.resolvingSymlinksInPath().path == key }) {
+                other.window?.makeKeyAndOrderFront(nil)
+                other.activate(tab)
+                completion?(tab)
+                return
+            }
+        }
         let matches = tabs.filter { $0.document.url?.resolvingSymlinksInPath().path == key }
         if let pane, let other = matches.first, !matches.contains(where: { $0.pane === pane }) {
             completion?(addTab(other.document, in: pane))
@@ -1022,9 +1109,103 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
     // MARK: Window
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        // Closing the only window quits, which runs the save prompts exactly once.
-        NSApp.terminate(nil)
+        // Closing the last window quits, which runs the save prompts exactly once.
+        if MainWindowController.all.count <= 1 {
+            NSApp.terminate(nil)
+            return false
+        }
+        confirmCloseAll { [weak self] proceed in
+            if proceed { self?.closeWindow() }
+        }
         return false
+    }
+
+    /// Closes this window without asking (prompts already done, or nothing to lose).
+    func closeWindow() {
+        for tab in tabs { tab.editor?.detach() }
+        watcher?.stop()
+        autosaveTimer?.invalidate()
+        NotificationCenter.default.removeObserver(self)
+        DistributedNotificationCenter.default().removeObserver(self)
+        responderObservation = nil
+        (NSApp.delegate as? AppDelegate)?.remove(self)
+        window?.close()
+        Session.save(self)
+    }
+
+    // MARK: Moving tabs between panes and windows
+
+    /// Takes a tab out of this window, keeping its editor alive so it can move elsewhere.
+    func takeOut(_ tab: Tab) {
+        guard let pane = tab.pane, let index = pane.tabs.firstIndex(where: { $0 === tab }) else { return }
+        tab.editor?.rootView.removeFromSuperview()
+        pane.tabs.remove(at: index)
+        tab.pane = nil
+        if tabs.isEmpty {
+            pane.activeIndex = -1
+            if MainWindowController.all.count > 1 {
+                // An emptied window goes away, like a browser window whose last tab left.
+                DispatchQueue.main.async { [weak self] in self?.closeWindow() }
+            } else {
+                showWelcome()
+            }
+            updateChrome()
+        } else if pane.tabs.isEmpty {
+            removePane(pane)
+            if let next = activeTab { activate(next) }
+        } else {
+            pane.activeIndex = min(index, pane.tabs.count - 1)
+            if pane === activePane { activate(pane.tabs[pane.activeIndex]) } else { show(pane.tabs[pane.activeIndex]) }
+        }
+        updateWatchedPaths()
+        Session.save(self)
+    }
+
+    /// Puts a tab (from this window or another one) into a pane of this window.
+    func adopt(_ tab: Tab, into pane: Pane, at index: Int?) {
+        if focusMode { toggleFocusMode(nil) }
+        tab.pane = pane
+        let position = min(max(0, index ?? pane.activeIndex + 1), pane.tabs.count)
+        pane.tabs.insert(tab, at: position)
+        activate(tab)
+        updateWatchedPaths()
+        window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Drop of the dragged tab on a pane's tab bar (`index`) or editor area (nil).
+    @discardableResult
+    func acceptDraggedTab(into pane: Pane, at index: Int?) -> Bool {
+        guard let tab = TabDrag.tab, let from = tab.pane else { return false }
+        TabDrag.tab = nil
+        if from === pane {
+            guard let index, let current = pane.tabs.firstIndex(where: { $0 === tab }) else { return true }
+            let target = min(index > current ? index - 1 : index, pane.tabs.count - 1)
+            pane.tabs.remove(at: current)
+            pane.tabs.insert(tab, at: target)
+            pane.activeIndex = target
+            activate(tab)
+            return true
+        }
+        from.owner.takeOut(tab)
+        adopt(tab, into: pane, at: index)
+        return true
+    }
+
+    /// A tab dragged outside the app (or "Move to New Window"): it gets its own window.
+    func tearOff(_ tab: Tab, at screenPoint: NSPoint?) {
+        guard let window else { return }
+        let topLeft = screenPoint.map { NSPoint(x: $0.x - 80, y: $0.y + 18) }
+        if tabs.count == 1 {
+            // Nothing would be left behind: just move this window there.
+            if let topLeft { window.setFrameTopLeftPoint(topLeft) }
+            return
+        }
+        guard let delegate = NSApp.delegate as? AppDelegate else { return }
+        let controller = delegate.newWindow(cascadingFrom: self)
+        if let topLeft { controller.window?.setFrameTopLeftPoint(topLeft) }
+        if let folder { controller.openWorkspace(folder) }
+        takeOut(tab)
+        controller.adopt(tab, into: controller.panes[0], at: 0)
     }
 
     // MARK: Helpers
