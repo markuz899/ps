@@ -1,10 +1,64 @@
 # PS — Prose & Source
 
 Native macOS editor (Swift + AppKit) that behaves like VS Code for code and like a word
-processor for `.rtf`, `.rtfd` and `.txt` documents. One window, one `NSTextView` set up
-in two ways, no dependencies.
+processor for `.rtf`, `.rtfd` and `.txt` documents. A single `NSTextView` set up in two
+ways, no dependencies.
 
-## Building and running
+## Installation
+
+There is no ready-made release: you build the app from source (about a minute).
+
+**Requirements**
+
+- macOS 13 Ventura or later, on Apple Silicon or Intel.
+- **Xcode 15 or later** (from the App Store), opened at least once to accept the licence.
+  The Command Line Tools alone are not enough: the universal build uses Xcode's build system.
+  If `xcode-select -p` doesn't point at Xcode: `sudo xcode-select -s /Applications/Xcode.app`.
+
+**Build and install**
+
+```sh
+git clone https://github.com/markuz899/ps.git
+cd ps
+./scripts/build-app.sh                  # → build/PS.app (universal, ~4 MB)
+ditto build/PS.app /Applications/PS.app # install
+open /Applications/PS.app
+```
+
+To update: `git pull`, run `./scripts/build-app.sh` again and copy the app again.
+
+**First launch**
+
+- An app built on your own Mac opens without warnings.
+- The app is signed *ad hoc* (no Apple developer certificate). If you copy it to **another
+  Mac** (AirDrop, zip, download), macOS will say it can't be opened or is damaged: on that
+  Mac, right-click the app ▸ Open ▸ Open, or run
+  `xattr -dr com.apple.quarantine /Applications/PS.app`.
+
+**Opening files with PS**
+
+- From the welcome screen, File ▸ Open (⌘O) or Open Folder (⇧⌘O), or by dropping files and
+  folders onto the window.
+- From the terminal: `open -a PS file.swift` or `open -a PS my-project/`.
+- To make it the default app for a type: Finder ▸ select a file ▸ File ▸ Get Info ▸
+  "Open with" ▸ PS ▸ "Change All…".
+
+**Uninstall**
+
+```sh
+rm -rf /Applications/PS.app
+defaults delete app.prose-source.PS                 # settings, session, recents
+rm -rf ~/Library/Application\ Support/PS             # only if you added your own themes
+```
+
+**Troubleshooting**
+
+- `error: No target named 'PS-debug.exe' in build description` (seen with Xcode 15.3):
+  delete the build cache with `rm -rf .build` and run the script again.
+- Window in the wrong place or with odd sizes after an update: `defaults delete
+  app.prose-source.PS "NSWindow Frame PSMainWindow"`.
+
+## Building for development
 
 Requirements: Xcode 15 or later (Swift 5.9+), macOS 13+.
 
