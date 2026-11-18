@@ -313,6 +313,16 @@ enum SelfTest {
             check(!tab.document.isDirty, "undo back to the saved text clears the dirty dot")
         }
 
+        // Regression: closing a code tab with the caret past the start used to crash.
+        step("close code tab with caret") {
+            guard let python = tab(named: "app.py"), let view = python.editor?.textView else { return }
+            controller.activate(python)
+            view.setSelectedRange(NSRange(location: 60, length: 0))
+            controller.closeTab(python)
+            check(tab(named: "app.py") == nil, "a code tab with the caret in the middle closes without crashing")
+            controller.open(src.appendingPathComponent("app.py"))
+        }
+
         // Rich text document created with the bar's commands only.
         step("new rich document") {
             controller.newRichDocument(nil)
@@ -826,6 +836,16 @@ enum SelfTest {
             check(draft?.document.isDirty == true, "and it is still marked as unsaved")
             check(controller.activeTab?.document.url?.lastPathComponent == "main.swift", "active tab restored")
             check(controller.activeTab?.editor?.textView.selectedRange().location == 120, "cursor position restored")
+            controller.closeFolder(nil)
+        }
+        step("folder closed") {
+            let root = workspace.resolvingSymlinksInPath().path + "/"
+            check(controller.folder == nil && controller.sidebar.tree.root == nil, "Close Folder empties the sidebar")
+            check(!controller.tabs.contains { $0.document.url?.resolvingSymlinksInPath().path.hasPrefix(root) == true }, "the folder's tabs are closed")
+            check(controller.tabs.contains { $0.document.url == nil }, "tabs from outside the folder stay open")
+            check(controller.window?.title == "PS", "the window title no longer shows the folder")
+            let saved = (Prefs.defaults.dictionary(forKey: "session")?["windows"] as? [[String: Any]])?.first
+            check(saved?["folder"] == nil, "the next launch won't reopen it")
         }
     }
 }

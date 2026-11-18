@@ -230,6 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             .separator(),
             item(L("Open…"), #selector(W.openDocument(_:)), "o"),
             item(L("Open Folder…"), #selector(W.openFolder(_:)), "o", [.command, .shift]),
+            item(L("Close Folder"), #selector(W.closeFolder(_:)), "w", [.command, .option, .shift]),
             recentItem,
             item(L("Quick Open…"), #selector(W.quickOpenFile(_:)), "p"),
             item(L("Command Palette…"), #selector(W.showCommandPalette(_:)), "p", [.command, .shift]),

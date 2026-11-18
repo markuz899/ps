@@ -884,6 +884,44 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         Session.save(self)
     }
 
+    func fileTreeCloseFolder() {
+        closeFolder(nil)
+    }
+
+    /// Stops working on the folder: its files' tabs close (asking about unsaved changes;
+    /// Cancel stops everything), tabs from elsewhere stay, the sidebar empties.
+    @objc func closeFolder(_ sender: Any?) {
+        guard let folder else { return }
+        let root = folder.resolvingSymlinksInPath().path + "/"
+        let inside = tabs.filter { $0.document.url.map { $0.resolvingSymlinksInPath().path.hasPrefix(root) } ?? false }
+        func next(_ remaining: ArraySlice<Tab>) {
+            guard let tab = remaining.first else {
+                finishClosingFolder()
+                return
+            }
+            guard tab.pane != nil else {
+                next(remaining.dropFirst())
+                return
+            }
+            closeTab(tab) { proceed in
+                if proceed { next(remaining.dropFirst()) }
+            }
+        }
+        next(inside[...])
+    }
+
+    private func finishClosingFolder() {
+        folder = nil
+        sidebar.tree.setRoot(nil)
+        sidebar.search.root = nil
+        sidebar.search.reset()
+        quickOpen.invalidateIndex()
+        updateWatchedPaths()
+        updateChrome()
+        if tabs.isEmpty { showWelcome() }
+        Session.save(self)
+    }
+
     private func select(_ range: NSRange, in tab: Tab) {
         guard let view = tab.editor?.textView, NSMaxRange(range) <= (view.string as NSString).length else { return }
         view.setSelectedRange(range)
@@ -1695,6 +1733,8 @@ extension MainWindowController: NSMenuItemValidation {
             return tab != nil && panes.count < MainWindowController.maxPanes && !focusMode
         case #selector(focusNextPane(_:)), #selector(focusPreviousPane(_:)):
             return panes.count > 1
+        case #selector(closeFolder(_:)):
+            return folder != nil
         case #selector(closePane(_:)):
             return !(activePane?.tabs.isEmpty ?? true)
         case #selector(toggleFocusMode(_:)):
