@@ -4,6 +4,15 @@ Native macOS editor (Swift + AppKit) that behaves like VS Code for code and like
 processor for `.rtf`, `.rtfd` and `.txt` documents. A single `NSTextView` set up in two
 ways, no dependencies.
 
+![PS whiteboard](docs/screenshots/whiteboard-light.png)
+
+| | |
+|---|---|
+| ![Code editor](docs/screenshots/code.png) | ![Rich text document](docs/screenshots/document.png) |
+| ![Split panes](docs/screenshots/panes.png) | ![Markdown preview](docs/screenshots/markdown.png) |
+| ![Command palette](docs/screenshots/palette.png) | ![Whiteboard, dark mode](docs/screenshots/whiteboard-dark.png) |
+| ![Welcome screen](docs/screenshots/welcome.png) | ![Focus mode](docs/screenshots/focus.png) |
+
 ## Installation
 
 There is no ready-made release: you build the app from source (about a minute).
@@ -20,7 +29,7 @@ There is no ready-made release: you build the app from source (about a minute).
 ```sh
 git clone https://github.com/markuz899/ps.git
 cd ps
-./scripts/build-app.sh                  # → build/PS.app (universal, ~4 MB)
+./scripts/build-app.sh                  # → build/PS.app (universal, ~5 MB)
 ditto build/PS.app /Applications/PS.app # install
 open /Applications/PS.app
 ```
@@ -81,6 +90,38 @@ Test modes built into the binary (used for the report):
 | `--bench <file>` | open time, max main-thread stall, cost per keystroke and per scroll frame |
 | `--selftest <folder> <screenshots>` | runs the acceptance criteria inside the real app (windows, sheets, files) and saves screenshots |
 | `--selftest-restore <folder>` | second half: checks session restore after a relaunch |
+
+## Whiteboard
+
+File ▸ **New Whiteboard** (⌃⌘N) opens an infinite canvas for sketching ideas, software
+architectures, application flows and diagrams, in the spirit of [Excalidraw](https://excalidraw.com).
+
+- **Excalidraw format**: boards are saved as `.excalidraw` files, so they open on
+  excalidraw.com and Excalidraw files open in PS. Copied elements use Excalidraw's clipboard
+  format: paste them straight into excalidraw.com (and back).
+- **Tools** (same keys as Excalidraw): hand `H`, selection `V`/`1`, rectangle `R`/`2`,
+  diamond `D`/`3`, ellipse `O`/`4`, arrow `A`/`5`, line `L`/`6`, pencil `P`/`7`,
+  text `T`/`8`, eraser `E`/`0`. Shift keeps squares and 15° angles.
+- **Hand-drawn look**: sketchy strokes with three levels of sloppiness (architect, artist,
+  cartoonist), hachure / cross-hatch / solid fills, stroke colours and widths, dashed and
+  dotted lines, rounded or sharp corners, opacity, a hand-written font.
+- **Diagrams**: arrows dropped on a shape attach to it and follow it when it moves;
+  double-click a shape to write inside it; arrowheads (arrow, triangle, dot).
+- **Editing**: click / shift-click / marquee selection, move, resize from the corners,
+  arrow keys to nudge, ⌘D duplicate, ⌘G / ⇧⌘G group and ungroup, layer order,
+  Delete, unlimited undo.
+- **Canvas**: pinch or ⌘-scroll to zoom, scroll or space-drag to pan, ⌘+ / ⌘- / ⌘0,
+  dotted grid; in dark mode colours are inverted the way Excalidraw does it.
+- **Export**: File ▸ Export as PNG… or ⌥⇧⌘C (the selection, or the whole board).
+
+Not supported yet: images on the board, rotation handles (rotated elements from Excalidraw
+are drawn rotated), frames, libraries, live collaboration.
+
+## Unsaved files
+
+New files you never saved don't block quitting: they come back, with their content and
+still marked unsaved, the next time PS starts (kept in
+`~/Library/Application Support/PS/Unsaved/`). Closing a single tab or window still asks.
 
 ## Extras
 
@@ -159,7 +200,8 @@ To add a theme: one JSON file in `Themes/` (or in the user folder).
 | Next/previous tab · Tab N (⌘9 = last) | ⌃⇥ / ⌃⇧⇥ · ⌘1…⌘9 |
 | Find · Find and replace · Next/previous · Use selection | ⌘F · ⌥⌘F · ⌘G / ⇧⌘G · ⌘E |
 | Find in folder · Explorer · Toggle sidebar | ⇧⌘F · ⇧⌘E · ⌃⌘S |
-| Command Palette · New window | ⇧⌘P · ⌥⌘N |
+| Command Palette · New window · New whiteboard | ⇧⌘P · ⌥⌘N · ⌃⌘N |
+| Sidebar: show / hide | ⌃⌘S, the button in the title bar or in the sidebar |
 | Split editor · Next/previous pane | ⌘\ · ⌃⌘→ / ⌃⌘← |
 | Focus mode · Markdown preview | ⇧⌘↩ · ⇧⌘V |
 | Multiple cursors: next occurrence · caret above/below · add caret | ⌘D · ⌥⌘↑ / ⌥⌘↓ · ⌥click |
@@ -185,9 +227,9 @@ To add a theme: one JSON file in `Themes/` (or in the user folder).
 
 | Target | Result | Method |
 |---|---|---|
-| Cold start < 0.5 s | **0.26–0.29 s** (first run after a build: up to 0.57 s) | `--measure`: process start time (`sysctl KERN_PROC_PID`) → first window frame drawn. 5 consecutive runs. A true cold start after a reboot was **not** measured. |
+| Cold start < 0.5 s | **0.28–0.32 s** (first run after a build: up to 0.67 s) | `--measure`: process start time (`sysctl KERN_PROC_PID`) → first window frame drawn. 5 consecutive runs. A true cold start after a reboot was **not** measured. |
 | Memory at rest < 80 MB | **19.5–28 MB** | `--measure`: `phys_footprint` (the figure Activity Monitor shows) 3 s after the empty window opens |
-| Bundle < 30 MB | **3.7 MB** (universal) | `du -sh build/PS.app`; `lipo -info` → `x86_64 arm64` |
+| Bundle < 30 MB | **5.0 MB** (universal, whiteboard included) | `du -sh build/PS.app`; `lipo -info` → `x86_64 arm64` |
 | Smooth on 10,000 lines | typing **1.0 ms** avg / 3.6 ms p95 per keystroke; scrolling **1.0 ms**/frame; opens in 104 ms (longest stall 135 ms) | `--bench`: 200 keystrokes in the middle of the file, each one = insert + incremental highlight + full redraw; 120 half-page scrolls with redraw |
 | 5 MB without blocking | opens in **129 ms**, longest main-thread stall **170 ms**, typing 3.8 ms | `--bench` with a 5-ms timer that measures the gaps on the main thread while the file opens. Above 5 MiB highlighting turns off and the status bar says so. With a 4.5 MB file *with* highlighting: 113 ms to open, 122 ms max stall (the background pass is applied in chunks of 4,000 tokens) |
 
@@ -204,7 +246,7 @@ single cause.
 ### Acceptance criteria
 
 "Verified" = checked by running the app (`--selftest` + `--selftest-restore`, real windows and
-files, 98 checks, all passed, plus 30 unit tests). "Deduced" = from the code only, not run.
+files, 118 checks, all passed, plus 36 unit tests). "Deduced" = from the code only, not run.
 
 | Criterion | Outcome |
 |---|---|

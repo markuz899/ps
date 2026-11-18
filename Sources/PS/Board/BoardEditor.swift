@@ -35,6 +35,9 @@ final class BoardEditor: NSObject, DocumentEditor {
         self.document = document
         canvas = BoardCanvas(document: document)
         inspector = BoardInspector(canvas: canvas)
+        // Every board change makes its own explicit undo group; the automatic per-event
+        // group stayed open across changes and merged them into one step.
+        document.undoManager.groupsByEvent = false
         super.init()
         build()
         canvas.onChange = { [weak self] in
