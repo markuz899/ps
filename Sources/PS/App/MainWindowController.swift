@@ -530,6 +530,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         let view = editor.textView
         statusBar.showCode(document.mode == .code)
         statusBar.notice.isHidden = true
+        if document.mode == .board {
+            let count = document.board.visible.filter { $0.containerId == nil }.count
+            statusBar.counts.stringValue = L("%d elements", count)
+            statusBar.kind.stringValue = L("Whiteboard") + " · Excalidraw"
+            return
+        }
         if document.mode == .code {
             let location = view.selectedRange().location
             let line = document.lineIndex.line(at: location)
@@ -588,7 +594,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
 
     private func editor(for tab: Tab) -> DocumentEditor {
         if let editor = tab.editor { return editor }
-        let editor: DocumentEditor = tab.document.mode == .code ? CodeEditor(document: tab.document) : RichEditor(document: tab.document)
+        let editor: DocumentEditor
+        switch tab.document.mode {
+        case .code: editor = CodeEditor(document: tab.document)
+        case .rich: editor = RichEditor(document: tab.document)
+        case .board: editor = BoardEditor(document: tab.document)
+        }
         editor.onSelectionChange = { [weak self, weak tab] in
             guard let self, let tab, let pane = tab.pane, pane.activeTab === tab else { return }
             self.updateBreadcrumb(pane)
@@ -620,7 +631,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         pane.activeIndex = index
         setActivePane(pane)
         show(tab)
-        window?.makeFirstResponder(tab.editor?.textView)
+        window?.makeFirstResponder(tab.editor?.focusView)
         if let url = tab.document.url { sidebar.tree.select(url) }
         updateChrome()
         updateStatus()
@@ -913,7 +924,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
-        if document.mode == .rich {
+        if document.mode == .board {
+            panel.allowedContentTypes = [UTType(filenameExtension: "excalidraw") ?? .json]
+            panel.nameFieldStringValue = (document.url?.deletingPathExtension().lastPathComponent ?? document.displayName) + ".excalidraw"
+        } else if document.mode == .rich {
             let needsRTFD = RichTextIO.hasAttachments(document.textStorage)
             panel.allowedContentTypes = needsRTFD ? [.rtfd] : [.rtf, .rtfd, .plainText]
             panel.nameFieldStringValue = (document.url?.deletingPathExtension().lastPathComponent ?? document.displayName) + (needsRTFD ? ".rtfd" : ".rtf")
@@ -1298,6 +1312,10 @@ extension MainWindowController: NSMenuItemValidation {
         _ = addTab(Document(mode: .rich))
     }
 
+    @objc func newWhiteboard(_ sender: Any?) {
+        _ = addTab(Document(mode: .board))
+    }
+
     @objc func openDocument(_ sender: Any?) {
         guard let window else { return }
         let panel = NSOpenPanel()
@@ -1626,9 +1644,17 @@ extension MainWindowController: NSMenuItemValidation {
         Prefs.defaults.set(!Prefs.showHidden, forKey: Prefs.Key.showHidden)
     }
 
-    @objc func zoomIn(_ sender: Any?) { adjustFontSize(1) }
-    @objc func zoomOut(_ sender: Any?) { adjustFontSize(-1) }
-    @objc func zoomReset(_ sender: Any?) { Prefs.defaults.removeObject(forKey: Prefs.Key.codeFontSize) }
+    private var activeBoard: BoardEditor? { activeTab?.editor as? BoardEditor }
+
+    @objc func zoomIn(_ sender: Any?) { if let board = activeBoard { board.zoomIn() } else { adjustFontSize(1) } }
+    @objc func zoomOut(_ sender: Any?) { if let board = activeBoard { board.zoomOut() } else { adjustFontSize(-1) } }
+    @objc func zoomReset(_ sender: Any?) {
+        if let board = activeBoard {
+            board.canvas.setZoom(1)
+        } else {
+            Prefs.defaults.removeObject(forKey: Prefs.Key.codeFontSize)
+        }
+    }
 
     private func adjustFontSize(_ delta: Double) {
         let size = min(40, max(8, Prefs.defaults.double(forKey: Prefs.Key.codeFontSize) + delta))
@@ -1639,11 +1665,12 @@ extension MainWindowController: NSMenuItemValidation {
         let tab = activeTab
         let document = tab?.document
         switch menuItem.action {
-        case #selector(saveDocument(_:)), #selector(saveDocumentAs(_:)), #selector(closeActiveTab(_:)),
-             #selector(printDocument(_:)), #selector(exportPDF(_:)), #selector(showFind(_:)),
+        case #selector(saveDocument(_:)), #selector(saveDocumentAs(_:)), #selector(closeActiveTab(_:)):
+            return tab != nil
+        case #selector(printDocument(_:)), #selector(exportPDF(_:)), #selector(showFind(_:)),
              #selector(showFindReplace(_:)), #selector(findNextMatch(_:)), #selector(findPreviousMatch(_:)),
              #selector(useSelectionForFind(_:)), #selector(goToLine(_:)):
-            return tab != nil
+            return tab != nil && document?.mode != .board
         case #selector(saveAllDocuments(_:)):
             return tabs.contains { $0.document.isDirty }
         case #selector(revertDocumentToSaved(_:)):
@@ -1677,7 +1704,7 @@ extension MainWindowController: NSMenuItemValidation {
             menuItem.state = (tab?.editor as? CodeEditor)?.isPreviewVisible == true ? .on : .off
             return document?.language.id == "markdown" && document?.mode == .code
         case #selector(copyCodeImage(_:)), #selector(exportCodeImage(_:)):
-            return document?.mode == .code && (document?.textStorage.length ?? 0) > 0
+            return document?.mode == .board ? document?.hasContent == true : document?.mode == .code && (document?.textStorage.length ?? 0) > 0
         case #selector(selectTabByNumber(_:)):
             return !tabs.isEmpty
         case #selector(toggleWordWrap(_:)):
@@ -1813,6 +1840,9 @@ extension MainWindowController {
     }
 
     private func codeImage() -> (data: Data, name: String)? {
+        if let tab = activeTab, let board = tab.editor as? BoardEditor {
+            return board.canvas.pngData().map { ($0, (tab.document.displayName as NSString).deletingPathExtension) }
+        }
         guard let tab = activeTab, let editor = tab.editor as? CodeEditor else { return nil }
         let title = tab.document.displayName
         guard let data = CodeSnapshot.png(view: editor.textView, title: title, theme: Prefs.theme(for: NSApp.effectiveAppearance)) else { return nil }

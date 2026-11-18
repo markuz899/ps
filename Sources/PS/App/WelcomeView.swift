@@ -49,6 +49,7 @@ final class WelcomeView: NSView {
         let actions = [
             Action(symbol: "chevron.left.forwardslash.chevron.right", title: L("New File"), shortcut: "⌘N", selector: #selector(MainWindowController.newCodeFile(_:))),
             Action(symbol: "doc.richtext", title: L("New Text Document"), shortcut: "⇧⌘N", selector: #selector(MainWindowController.newRichDocument(_:))),
+            Action(symbol: "scribble.variable", title: L("New Whiteboard"), shortcut: "⌃⌘N", selector: #selector(MainWindowController.newWhiteboard(_:))),
             Action(symbol: "doc", title: L("Open File…"), shortcut: "⌘O", selector: #selector(MainWindowController.openDocument(_:))),
             Action(symbol: "folder", title: L("Open Folder…"), shortcut: "⇧⌘O", selector: #selector(MainWindowController.openFolder(_:))),
         ]
@@ -78,7 +79,7 @@ final class WelcomeView: NSView {
             stack.centerXAnchor.constraint(equalTo: centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -10),
             stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 24),
-            cards.widthAnchor.constraint(lessThanOrEqualToConstant: 640),
+            cards.widthAnchor.constraint(lessThanOrEqualToConstant: 820),
         ])
 
         // A gentle float on the icon.
@@ -202,7 +203,7 @@ private final class WelcomeCard: NSView {
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 148),
+            widthAnchor.constraint(equalToConstant: 140),
             heightAnchor.constraint(equalToConstant: 104),
             stack.centerXAnchor.constraint(equalTo: centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),

@@ -23,6 +23,7 @@ enum FileIcon {
     static func symbol(for url: URL?, mode: EditorMode? = nil, isDirectory: Bool = false) -> (String, NSColor) {
         if isDirectory { return ("folder.fill", NSColor.systemBlue.withAlphaComponent(0.85)) }
         let ext = url?.pathExtension.lowercased() ?? ""
+        if mode == .board || ext == "excalidraw" { return ("scribble.variable", .systemPink) }
         if mode == .rich || ["rtf", "rtfd"].contains(ext) { return ("doc.richtext.fill", .systemIndigo) }
         if ext == "txt" { return ("doc.text.fill", .systemGray) }
         let language = LanguageRegistry.detect(fileName: url?.lastPathComponent ?? "", firstLine: nil).id
