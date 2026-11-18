@@ -183,7 +183,9 @@ final class CodeTextView: NSTextView {
     private func updateHighlightedWord() {
         let selection = selectedRange()
         let text = nsString
-        guard text.length < 5_000_000 else {
+        // While the view is being detached from its text (tab closing) the selection can
+        // briefly point past the end of an empty string.
+        guard text.length < 5_000_000, NSMaxRange(selection) <= text.length else {
             highlightedWord = nil
             return
         }

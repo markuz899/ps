@@ -132,6 +132,17 @@ final class FolderSearchController: NSViewController, NSOutlineViewDataSource, N
         view.window?.makeFirstResponder(field)
     }
 
+    /// Back to empty, e.g. when the folder is closed.
+    func reset() {
+        task?.cancel()
+        searchID += 1
+        results = []
+        outline.reloadData()
+        spinner.stopAnimation(nil)
+        stop.isHidden = true
+        status.stringValue = ""
+    }
+
     func prefill(_ text: String) {
         field.stringValue = text
         start()

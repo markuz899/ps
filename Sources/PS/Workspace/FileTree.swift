@@ -82,6 +82,7 @@ protocol FileTreeDelegate: AnyObject {
     func fileTree(open url: URL)
     func fileTree(didMove from: URL, to: URL)
     func fileTreeOpenDropped(_ urls: [URL])
+    func fileTreeCloseFolder()
 }
 
 /// Explorer: NSOutlineView with lazy folders, live refresh, context menu, inline rename
@@ -92,6 +93,7 @@ final class FileTreeController: NSViewController, NSOutlineViewDataSource, NSOut
     private(set) var root: FileNode?
     private var nodesByPath: [String: FileNode] = [:]
     private let header = NSTextField(labelWithString: "")
+    private let closeFolderButton = NSButton()
     private let placeholder = NSTextField(wrappingLabelWithString: L("No folder open"))
     private let dragType = NSPasteboard.PasteboardType("app.ps.filenode")
 
@@ -134,12 +136,25 @@ final class FileTreeController: NSViewController, NSOutlineViewDataSource, NSOut
         placeholder.alignment = .center
         placeholder.translatesAutoresizingMaskIntoConstraints = false
 
+        closeFolderButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: L("Close Folder"))?
+            .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
+        closeFolderButton.isBordered = false
+        closeFolderButton.contentTintColor = .tertiaryLabelColor
+        closeFolderButton.toolTip = L("Close Folder")
+        closeFolderButton.setAccessibilityLabel(L("Close Folder"))
+        closeFolderButton.target = self
+        closeFolderButton.action = #selector(closeFolderPressed)
+        closeFolderButton.isHidden = true
+        closeFolderButton.translatesAutoresizingMaskIntoConstraints = false
+
         let view = NSView()
-        for subview in [header, scroll, placeholder] { view.addSubview(subview) }
+        for subview in [header, closeFolderButton, scroll, placeholder] { view.addSubview(subview) }
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: view.topAnchor, constant: 6),
             header.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 14),
-            header.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
+            header.trailingAnchor.constraint(equalTo: closeFolderButton.leadingAnchor, constant: -6),
+            closeFolderButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            closeFolderButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
             scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -166,7 +181,12 @@ final class FileTreeController: NSViewController, NSOutlineViewDataSource, NSOut
             header.stringValue = ""
         }
         placeholder.isHidden = url != nil
+        closeFolderButton.isHidden = url == nil
         outline.reloadData()
+    }
+
+    @objc private func closeFolderPressed() {
+        delegate?.fileTreeCloseFolder()
     }
 
     func reloadAll() {

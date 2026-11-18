@@ -117,6 +117,14 @@ architectures, application flows and diagrams, in the spirit of [Excalidraw](htt
 Not supported yet: images on the board, rotation handles (rotated elements from Excalidraw
 are drawn rotated), frames, libraries, live collaboration.
 
+## Closing a folder
+
+File ▸ **Close Folder** (⌥⇧⌘W), or the × next to the folder name in the sidebar, stops
+working on the open folder: the tabs of its files close (asking about unsaved changes —
+Cancel stops everything), tabs of files from elsewhere and new unsaved files stay open, the
+explorer, folder search and Quick Open are emptied, and the next launch won't reopen it. It
+stays in File ▸ Open Recent.
+
 ## Unsaved files
 
 New files you never saved don't block quitting: they come back, with their content and
@@ -194,7 +202,7 @@ To add a theme: one JSON file in `Themes/` (or in the user folder).
 | Action | Keys |
 |---|---|
 | New file (code/plain text) · New text document | ⌘N · ⇧⌘N |
-| Open · Open folder · Quick Open | ⌘O · ⇧⌘O · ⌘P |
+| Open · Open folder · Close folder · Quick Open | ⌘O · ⇧⌘O · ⌥⇧⌘W · ⌘P |
 | Save · Save As · Save All | ⌘S · ⇧⌘S · ⌥⌘S |
 | Close tab · Close window | ⌘W · ⇧⌘W |
 | Next/previous tab · Tab N (⌘9 = last) | ⌃⇥ / ⌃⇧⇥ · ⌘1…⌘9 |
@@ -246,7 +254,7 @@ single cause.
 ### Acceptance criteria
 
 "Verified" = checked by running the app (`--selftest` + `--selftest-restore`, real windows and
-files, 118 checks, all passed, plus 36 unit tests). "Deduced" = from the code only, not run.
+files, 131 checks, all passed, plus 36 unit tests). "Deduced" = from the code only, not run.
 
 | Criterion | Outcome |
 |---|---|
