@@ -10,6 +10,7 @@ extension Notification.Name {
 enum LoadedContent {
     case plain(String, TextFormat)
     case rich(NSAttributedString, TextFormat?)
+    case board(BoardScene)
 }
 
 struct FileStamp: Equatable {
@@ -37,6 +38,8 @@ final class Document: NSObject, NSTextStorageDelegate {
     var useTabs = !Prefs.insertSpaces
     var indentWidth = Prefs.tabWidth
     let textStorage = NSTextStorage()
+    /// The whiteboard scene, for `.board` documents.
+    var board = BoardScene()
     let undoManager = UndoManager()
     let lineIndex = LineIndex()
     private(set) var isDirty = false
@@ -77,7 +80,12 @@ final class Document: NSObject, NSTextStorageDelegate {
 
     var displayName: String {
         if let url { return url.lastPathComponent }
-        let base = mode == .rich ? L("Untitled Document") : L("Untitled")
+        let base: String
+        switch mode {
+        case .code: base = L("Untitled")
+        case .rich: base = L("Untitled Document")
+        case .board: base = L("Untitled Whiteboard")
+        }
         return untitledNumber > 1 ? "\(base) \(untitledNumber)" : base
     }
 
@@ -87,6 +95,9 @@ final class Document: NSObject, NSTextStorageDelegate {
 
     /// Reads and decodes a file. Safe to call from any thread.
     static func read(_ url: URL, mode: EditorMode, encoding: String.Encoding? = nil) throws -> LoadedContent {
+        if mode == .board {
+            return .board(try BoardScene.decode(try Data(contentsOf: url)))
+        }
         let kind = RichFileKind(url: url)
         if mode == .rich, kind == .rtf || kind == .rtfd {
             return .rich(try RichTextIO.read(url, defaults: Prefs.richDefaults).text, nil)
@@ -118,6 +129,10 @@ final class Document: NSObject, NSTextStorageDelegate {
             mode = .rich
             if let format { self.format = format }
             textStorage.setAttributedString(text)
+        case let .board(scene):
+            mode = .board
+            board = scene
+            textStorage.setAttributedString(NSAttributedString())
         }
         highlightingDisabled = textStorage.length > Document.highlightLimit
         lineIndex.rebuild(textStorage.string as NSString)
@@ -127,7 +142,7 @@ final class Document: NSObject, NSTextStorageDelegate {
 
     /// Switches a .txt between the two editors, keeping the text in memory.
     func convert(to newMode: EditorMode) {
-        guard newMode != mode else { return }
+        guard newMode != mode, newMode != .board, mode != .board else { return }
         let wasDirty = isDirty
         if newMode == .code {
             apply(.plain(RichTextIO.plainString(textStorage), format))
@@ -148,6 +163,10 @@ final class Document: NSObject, NSTextStorageDelegate {
     /// Writes the text in the document's own format. Throws on any I/O or encoding error;
     /// the in-memory document is left untouched in that case.
     func write(to target: URL, kind: RichFileKind? = nil) throws {
+        if mode == .board {
+            try SafeWriter.write(try board.encoded(), to: target)
+            return
+        }
         if mode == .code {
             try SafeWriter.write(try TextFileIO.encode(textStorage.string, format: format), to: target)
         } else {
@@ -180,7 +199,7 @@ final class Document: NSObject, NSTextStorageDelegate {
         // don't alter the string, so rich documents (and huge files) just stay dirty.
         // Untitled: "modified" means "has something worth keeping".
         if url == nil {
-            setDirty(textStorage.length > 0)
+            setDirty(hasContent)
             return
         }
         if mode == .code, let saved = savedText {
@@ -189,6 +208,10 @@ final class Document: NSObject, NSTextStorageDelegate {
         } else {
             setDirty(true)
         }
+    }
+
+    var hasContent: Bool {
+        mode == .board ? !board.visible.isEmpty : textStorage.length > 0
     }
 
     /// For changes that don't touch the text, e.g. a new line-ending style.

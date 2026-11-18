@@ -48,6 +48,7 @@ final class LanguageTests: XCTestCase {
         XCTAssertEqual(EditorMode.forFile(URL(fileURLWithPath: "/a/b.md")), .code)
         XCTAssertEqual(EditorMode.forFile(URL(fileURLWithPath: "/a/b.py")), .code)
         XCTAssertEqual(EditorMode.forFile(URL(fileURLWithPath: "/a/Makefile")), .code)
+        XCTAssertEqual(EditorMode.forFile(URL(fileURLWithPath: "/a/flow.excalidraw")), .board)
     }
 
     func testThemesLoad() {
@@ -382,5 +383,97 @@ final class AssistTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: url), Data([0xEF, 0xBB, 0xBF] + Array("new one\r\nnew two\r\n".utf8)))
         XCTAssertEqual(try FolderSearch.replace(in: url, query: "missing", template: "x", options: FindOptions()), 0)
         try? FileManager.default.removeItem(at: url)
+    }
+}
+
+final class BoardTests: XCTestCase {
+    func testExcalidrawRoundTrip() throws {
+        var box = BoardElement(type: .rectangle, x: 10, y: 20, width: 100, height: 60)
+        box.backgroundColor = "#a5d8ff"
+        var label = BoardElement(type: .text, x: 30, y: 40)
+        label.text = "API"
+        label.containerId = box.id
+        box.boundElements = [.init(id: label.id, type: "text")]
+        var arrow = BoardElement(type: .arrow, x: 110, y: 50)
+        arrow.setAbsolutePoints([CGPoint(x: 110, y: 50), CGPoint(x: 300, y: 50)])
+        arrow.startBinding = .init(elementId: box.id)
+        let scene = BoardScene(elements: [box, label, arrow])
+
+        let data = try scene.encoded()
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(json["type"] as? String, "excalidraw")
+        XCTAssertEqual(json["version"] as? Int, 2)
+        let elements = try XCTUnwrap(json["elements"] as? [[String: Any]])
+        XCTAssertEqual(elements[2]["points"] as? [[Double]], [[0, 0], [190, 0]])
+        XCTAssertEqual(elements[2]["endArrowhead"] as? String, "arrow")
+        XCTAssertEqual(try BoardScene.decode(data), scene)
+    }
+
+    func testReadsExcalidrawFileWithMissingFields() throws {
+        let json = """
+        {"type":"excalidraw","version":2,"source":"https://excalidraw.com","elements":[
+          {"id":"a","type":"ellipse","x":0,"y":0,"width":40,"height":20,"strokeColor":"#e03131","seed":7},
+          {"id":"b","type":"image","x":5,"y":5,"width":10,"height":10,"fileId":"f"}
+        ],"appState":{"viewBackgroundColor":"#fffce8","gridSize":20},"files":{}}
+        """
+        let scene = try BoardScene.decode(Data(json.utf8))
+        XCTAssertEqual(scene.elements.count, 2)
+        XCTAssertEqual(scene.elements[0].type, .ellipse)
+        XCTAssertEqual(scene.elements[0].strokeColor, "#e03131")
+        XCTAssertEqual(scene.elements[0].roughness, 1)
+        XCTAssertEqual(scene.elements[1].type, .other)
+        XCTAssertEqual(scene.appState.viewBackgroundColor, "#fffce8")
+    }
+
+    func testHitTesting() {
+        let box = BoardElement(type: .rectangle, x: 0, y: 0, width: 100, height: 100)
+        XCTAssertTrue(BoardGeometry.hits(box, CGPoint(x: 0, y: 50), tolerance: 4))
+        XCTAssertFalse(BoardGeometry.hits(box, CGPoint(x: 50, y: 50), tolerance: 4), "an empty rectangle is hit on its outline only")
+        var filled = box
+        filled.backgroundColor = "#ffec99"
+        XCTAssertTrue(BoardGeometry.hits(filled, CGPoint(x: 50, y: 50), tolerance: 4))
+        let ring = BoardElement(type: .ellipse, x: 0, y: 0, width: 100, height: 50)
+        XCTAssertTrue(BoardGeometry.hits(ring, CGPoint(x: 100, y: 25), tolerance: 3))
+        XCTAssertFalse(BoardGeometry.hits(ring, CGPoint(x: 2, y: 2), tolerance: 3))
+        var line = BoardElement(type: .line, x: 0, y: 0)
+        line.setAbsolutePoints([.zero, CGPoint(x: 100, y: 100)])
+        XCTAssertTrue(BoardGeometry.hits(line, CGPoint(x: 50, y: 52), tolerance: 3))
+        XCTAssertFalse(BoardGeometry.hits(line, CGPoint(x: 80, y: 20), tolerance: 3))
+    }
+
+    func testArrowsFollowBoundShapes() throws {
+        var scene = BoardScene()
+        let left = BoardElement(type: .rectangle, x: 0, y: 0, width: 100, height: 100)
+        let right = BoardElement(type: .ellipse, x: 300, y: 0, width: 100, height: 100)
+        var arrow = BoardElement(type: .arrow, x: 104, y: 50)
+        arrow.setAbsolutePoints([CGPoint(x: 104, y: 50), CGPoint(x: 296, y: 50)])
+        arrow.startBinding = .init(elementId: left.id)
+        arrow.endBinding = .init(elementId: right.id)
+        scene.elements = [left, right, arrow]
+
+        scene.elements[1].y = 200
+        BoardGeometry.updateBindings(in: &scene, moved: [right.id])
+        let points = scene.elements[2].absolutePoints
+        // The end is now on the ellipse's outline, `gap` away, on the way to the box.
+        let center = CGPoint(x: 350, y: 250)
+        XCTAssertEqual(hypot(points[1].x - center.x, points[1].y - center.y), 54, accuracy: 6)
+        XCTAssertGreaterThan(points[0].y, 50, "the start slides along the box towards the moved ellipse")
+        XCTAssertLessThanOrEqual(points[0].x, 105)
+    }
+
+    func testClipboardMatchesExcalidraw() throws {
+        let element = BoardElement(type: .diamond, x: 1, y: 2, width: 3, height: 4)
+        let text = try XCTUnwrap(BoardScene.clipboardJSON([element]))
+        XCTAssertTrue(text.contains("\"excalidraw/clipboard\""))
+        XCTAssertEqual(BoardScene.elements(fromClipboard: text)?.first?.id, element.id)
+        XCTAssertNil(BoardScene.elements(fromClipboard: "just text"))
+    }
+
+    func testSeededRandomIsDeterministic() {
+        var a = SeededRandom(seed: 42)
+        var b = SeededRandom(seed: 42)
+        let first = (0..<5).map { _ in a.next() }
+        XCTAssertEqual(first, (0..<5).map { _ in b.next() })
+        XCTAssertTrue(first.allSatisfy { $0 >= -1 && $0 <= 1 })
     }
 }

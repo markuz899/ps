@@ -226,6 +226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         main.addItem(menu(L("File"), [
             item(L("New File"), #selector(W.newCodeFile(_:)), "n"),
             item(L("New Text Document"), #selector(W.newRichDocument(_:)), "n", [.command, .shift]),
+            item(L("New Whiteboard"), #selector(W.newWhiteboard(_:)), "n", [.command, .control]),
             .separator(),
             item(L("Open…"), #selector(W.openDocument(_:)), "o"),
             item(L("Open Folder…"), #selector(W.openFolder(_:)), "o", [.command, .shift]),
@@ -246,6 +247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             item(L("Export as PDF…"), #selector(W.exportPDF(_:))),
             item(L("Export as Word (.docx)…"), #selector(W.exportWord(_:))),
             item(L("Export as HTML…"), #selector(W.exportHTML(_:))),
+            item(L("Export as PNG…"), #selector(W.exportCodeImage(_:))),
             .separator(),
             item(L("Close Tab"), #selector(W.closeActiveTab(_:)), "w"),
             item(L("Close Window"), #selector(NSWindow.performClose(_:)), "w", [.command, .shift]),

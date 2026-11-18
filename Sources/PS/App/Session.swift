@@ -64,6 +64,7 @@ enum Session {
         switch document.mode {
         case .code: ext = "txt"
         case .rich: ext = "rtfd"
+        case .board: ext = "excalidraw"
         }
         return backupFolder.appendingPathComponent(document.backupID).appendingPathExtension(ext)
     }
@@ -79,6 +80,8 @@ enum Session {
                 try SafeWriter.write(try TextFileIO.encode(document.textStorage.string, format: .standard), to: url)
             case .rich:
                 try RichTextIO.write(NSAttributedString(attributedString: document.textStorage), to: url, kind: .rtfd)
+            case .board:
+                try SafeWriter.write(try document.board.encoded(), to: url)
             }
             document.backedUpVersion = document.version
             return url
@@ -101,7 +104,7 @@ enum Session {
                 let document = tab.document
                 guard let url = document.url else {
                     // Empty untitled tabs aren't worth bringing back.
-                    guard document.textStorage.length > 0, backUp(document) != nil else { return nil }
+                    guard document.hasContent, backUp(document) != nil else { return nil }
                     return ["untitled": document.backupID, "mode": document.mode.rawValue, "language": document.language.id, "cursor": cursor]
                 }
                 return ["path": url.path, "cursor": cursor]

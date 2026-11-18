@@ -4,11 +4,15 @@ import AppKit
 public enum EditorMode: String, Codable {
     case code
     case rich
+    /// Whiteboard (Excalidraw-compatible `.excalidraw` files).
+    case board
 
     public static let richExtensions: Set<String> = ["rtf", "rtfd", "txt"]
 
     public static func forFile(_ url: URL) -> EditorMode {
-        richExtensions.contains(url.pathExtension.lowercased()) ? .rich : .code
+        let ext = url.pathExtension.lowercased()
+        if ext == "excalidraw" { return .board }
+        return richExtensions.contains(ext) ? .rich : .code
     }
 }
 

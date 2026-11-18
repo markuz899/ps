@@ -6,6 +6,7 @@ protocol DocumentEditor: AnyObject {
     var document: Document { get }
     var rootView: NSView { get }
     var textView: NSTextView { get }
+    var focusView: NSView { get }
     var onSelectionChange: (() -> Void)? { get set }
     var onTextChange: (() -> Void)? { get set }
     func applyPreferences()
@@ -13,6 +14,9 @@ protocol DocumentEditor: AnyObject {
 }
 
 extension DocumentEditor {
+    /// The view that gets the keyboard focus when the tab is shown.
+    var focusView: NSView { textView }
+
     var visibleCharacterRange: NSRange? {
         guard let layoutManager = textView.layoutManager, let container = textView.textContainer else { return nil }
         let glyphs = layoutManager.glyphRange(forBoundingRect: textView.visibleRect, in: container)
