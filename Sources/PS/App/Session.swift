@@ -58,6 +58,7 @@ enum Session {
         ]
         if let folder = controller.folder { state["folder"] = folder.path }
         if let frame = controller.window?.frame { state["frame"] = NSStringFromRect(frame) }
+        state["sidebarCollapsed"] = controller.isSidebarCollapsed
         return state
     }
 
@@ -88,6 +89,7 @@ enum Session {
         if let folder = state["folder"] as? String, FileManager.default.fileExists(atPath: folder) {
             controller.openWorkspace(URL(fileURLWithPath: folder))
         }
+        if state["sidebarCollapsed"] as? Bool == true { controller.setSidebarCollapsed(true, animated: false) }
         // Older sessions had a single "tabs" list.
         let saved = state["panes"] as? [[String: Any]] ?? [["tabs": state["tabs"] ?? [], "active": state["active"] ?? ""]]
         let panes = saved.map { pane -> (tabs: [[String: Any]], active: String) in

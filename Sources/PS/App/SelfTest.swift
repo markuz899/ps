@@ -128,7 +128,25 @@ enum SelfTest {
         let notes = workspace.appendingPathComponent("docs/notes.txt")
         let originalNotes = try? Data(contentsOf: notes)
 
-        step("welcome") { screenshot("01-welcome") }
+        step("settings") {
+            (NSApp.delegate as? AppDelegate)?.showSettings(nil)
+        }
+        step("settings check") {
+            let window = NSApp.windows.first { $0.title == L("Settings") }
+            check(window?.isVisible == true, "Settings opens (no crash)")
+            if let window {
+                check(abs(window.frame.width - SettingsHost.size.width) < 40, "the Settings window keeps a stable size (\(Int(window.frame.width)) pt)")
+                if let image = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(window.windowNumber), [.boundsIgnoreFraming]) {
+                    try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: shots.appendingPathComponent("00-settings.png"))
+                }
+                window.close()
+            }
+        }
+        step("welcome") {
+            let items = controller.window?.toolbar?.items.map(\.itemIdentifier) ?? []
+            check(items.contains(.toggleSidebar), "the title bar has the show/hide sidebar button")
+            screenshot("01-welcome")
+        }
         step("open folder and five files") {
             controller.openWorkspace(workspace)
             for name in ["main.swift", "app.py", "index.ts", "style.css", "query.sql"] {
@@ -150,6 +168,18 @@ enum SelfTest {
                 check(tab.editor?.textView.enclosingScrollView?.rulersVisible == true, "\(name): line numbers visible")
             }
             if let index = controller.tabs.firstIndex(where: { $0.document.url?.lastPathComponent == "main.swift" }) { controller.activate(index) }
+        }
+        step("hide sidebar") {
+            controller.sidebar.onClose?()
+        }
+        step("sidebar hidden") {
+            check(controller.isSidebarCollapsed, "the button in the sidebar closes it")
+            screenshot("02b-sidebar-hidden")
+            NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
+        }
+        step("sidebar back") {
+            check(!controller.isSidebarCollapsed, "the title-bar toggle (⌃⌘S) brings it back")
+            check(Int(controller.window?.frame.width ?? 0) == 1180, "hiding and showing the sidebar doesn't resize the window")
         }
         step("tree expanded") {
             controller.sidebar.tree.select(src.appendingPathComponent("main.swift"))

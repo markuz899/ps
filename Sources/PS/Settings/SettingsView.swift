@@ -5,10 +5,21 @@ import SwiftUI
 /// SwiftUI is used only here: settings are a secondary surface, loaded on first open,
 /// and @AppStorage binds straight to the same UserDefaults keys the editors read.
 enum SettingsHost {
-    static func make() -> NSViewController {
-        let host = NSHostingController(rootView: SettingsView())
-        host.preferredContentSize = NSSize(width: 520, height: 360)
-        return host
+    static let size = NSSize(width: 540, height: 380)
+
+    /// A fixed-size window. The SwiftUI view must not drive the window size: with both the
+    /// window and the hosting view resizing each other AppKit recursed until it aborted.
+    static func makeWindow() -> NSWindow {
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable], backing: .buffered, defer: true)
+        let host = NSHostingView(rootView: SettingsView())
+        host.sizingOptions = []
+        host.frame = NSRect(origin: .zero, size: size)
+        host.autoresizingMask = [.width, .height]
+        window.contentView = host
+        window.title = L("Settings")
+        window.isReleasedWhenClosed = false
+        window.center()
+        return window
     }
 }
 
@@ -94,6 +105,6 @@ struct SettingsView: View {
             .padding(20)
             .tabItem { Label(L("Saving"), systemImage: "externaldrive") }
         }
-        .frame(width: 520, height: 340)
+        .frame(width: SettingsHost.size.width, height: SettingsHost.size.height)
     }
 }

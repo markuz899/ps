@@ -359,7 +359,9 @@ final class FolderSearchController: NSViewController, NSOutlineViewDataSource, N
 final class SidebarController: NSViewController {
     let tree = FileTreeController()
     let search = FolderSearchController()
+    var onClose: (() -> Void)?
     private let switcher = NSSegmentedControl()
+    private let closeButton = NSButton()
     private let container = NSView()
 
     override func loadView() {
@@ -375,12 +377,26 @@ final class SidebarController: NSViewController {
         switcher.translatesAutoresizingMaskIntoConstraints = false
         container.translatesAutoresizingMaskIntoConstraints = false
 
+        // Closes the sidebar (it comes back from the title-bar button or ⌃⌘S).
+        closeButton.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: L("Hide Sidebar"))
+        closeButton.isBordered = false
+        closeButton.contentTintColor = .secondaryLabelColor
+        closeButton.toolTip = L("Hide Sidebar") + " (⌃⌘S)"
+        closeButton.setAccessibilityLabel(L("Hide Sidebar"))
+        closeButton.target = self
+        closeButton.action = #selector(closePressed)
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+
         let root = NSView()
         root.addSubview(switcher)
+        root.addSubview(closeButton)
         root.addSubview(container)
         NSLayoutConstraint.activate([
             switcher.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 6),
             switcher.centerXAnchor.constraint(equalTo: root.centerXAnchor),
+            closeButton.centerYAnchor.constraint(equalTo: switcher.centerYAnchor),
+            closeButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -10),
+            closeButton.leadingAnchor.constraint(greaterThanOrEqualTo: switcher.trailingAnchor, constant: 6),
             container.topAnchor.constraint(equalTo: switcher.bottomAnchor, constant: 6),
             container.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             container.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -404,6 +420,10 @@ final class SidebarController: NSViewController {
             child.topAnchor.constraint(equalTo: container.topAnchor),
             child.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
+    }
+
+    @objc private func closePressed() {
+        onClose?()
     }
 
     @objc private func switched() {
