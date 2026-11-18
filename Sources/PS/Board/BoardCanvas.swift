@@ -66,6 +66,8 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
     private var editingID: String?
     private var editingIsNew = false
     private var undoRecorded = false
+    /// Typing in the text overlay has its own history, separate from the board's.
+    private let textUndo = UndoManager()
 
     var scene: BoardScene {
         get { document.board }
@@ -75,6 +77,9 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
     init(document: Document) {
         self.document = document
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        // Since macOS 14 views don't clip by default: the infinite canvas would paint
+        // over the neighbouring pane.
+        if #available(macOS 14, *) { clipsToBounds = true }
         setAccessibilityElement(true)
         setAccessibilityRole(.layoutArea)
         setAccessibilityLabel(L("Whiteboard"))
@@ -155,11 +160,17 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
         onChange?()
     }
 
+    /// One undo step per change. Explicit groups: relying on the run loop's automatic
+    /// grouping merged unrelated changes into one step.
     private func recordUndo() {
+        let manager = document.undoManager
+        let own = !gestureOpen
+        if own { manager.beginUndoGrouping() }
         let snapshot = scene
         let selected = selection
-        document.undoManager.registerUndo(withTarget: self) { canvas in canvas.restore(snapshot, selection: selected) }
-        document.undoManager.setActionName(L("Whiteboard Change"))
+        manager.registerUndo(withTarget: self) { canvas in canvas.restore(snapshot, selection: selected) }
+        manager.setActionName(L("Whiteboard Change"))
+        if own { manager.endUndoGrouping() }
     }
 
     private func restore(_ snapshot: BoardScene, selection selected: Set<String>) {
@@ -172,14 +183,22 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
         onChange?()
     }
 
-    /// Several changes during one drag count as one undo step.
+    private var gestureOpen = false
+
+    /// Several changes during one drag (or one text edit) count as one undo step.
     private func beginGesture() {
+        guard !gestureOpen else { return }
+        document.undoManager.beginUndoGrouping()
+        gestureOpen = true
         recordUndo()
         undoRecorded = true
     }
 
     private func endGesture() {
         undoRecorded = false
+        guard gestureOpen else { return }
+        gestureOpen = false
+        document.undoManager.endUndoGrouping()
     }
 
     private func element(_ id: String) -> BoardElement? {
@@ -532,7 +551,8 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
             break
         }
         interaction = .none
-        endGesture()
+        // A text edit opened by a double-click stays one step until it's committed.
+        if textEditor == nil { endGesture() }
         window?.invalidateCursorRects(for: self)
         needsDisplay = true
     }
@@ -600,7 +620,11 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
     // MARK: Text
 
     private func doubleClick(at point: CGPoint) {
-        guard let hit = BoardGeometry.element(at: point, in: scene, tolerance: 6 / zoom) else {
+        // Inside a shape, even an unfilled one, the text goes in the shape (as in Excalidraw).
+        let enclosing = scene.elements.reversed().first {
+            !$0.isDeleted && $0.containerId == nil && $0.type.isShape && BoardGeometry.bounds(of: $0).contains(point)
+        }
+        guard let hit = BoardGeometry.element(at: point, in: scene, tolerance: 6 / zoom) ?? enclosing else {
             beginTextEditing(newTextAt: point, container: nil)
             return
         }
@@ -690,6 +714,10 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
         repositionTextEditor()
     }
 
+    func undoManager(for view: NSTextView) -> UndoManager? {
+        textUndo
+    }
+
     func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         if selector == #selector(NSResponder.cancelOperation(_:)) {
             commitTextEditing()
@@ -707,6 +735,8 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
 
     func commitTextEditing() {
         guard let editor = textEditor, let id = editingID else { return }
+        editor.breakUndoCoalescing()
+        textUndo.removeAllActions()
         let content = editor.string
         textEditor = nil
         editingID = nil

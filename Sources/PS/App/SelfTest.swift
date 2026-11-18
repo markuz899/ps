@@ -76,6 +76,105 @@ enum SelfTest {
         try? NSBitmapImageRep(cgImage: composed).representation(using: .png, properties: [:])?.write(to: shots.appendingPathComponent(name + ".png"))
     }
 
+    private static func mouse(_ type: NSEvent.EventType, _ view: NSView, _ point: CGPoint, clicks: Int = 1) -> NSEvent {
+        NSEvent.mouseEvent(
+            with: type, location: view.convert(point, to: nil), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: view.window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: clicks, pressure: 1
+        )!
+    }
+
+    private static func drag(_ view: NSView, from start: CGPoint, to end: CGPoint, steps: Int = 6) {
+        view.mouseDown(with: mouse(.leftMouseDown, view, start))
+        for step in 1...steps {
+            let t = CGFloat(step) / CGFloat(steps)
+            // A slight curve, so freehand strokes aren't straight.
+            let point = CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t + sin(t * .pi) * 12)
+            view.mouseDragged(with: mouse(.leftMouseDragged, view, point))
+        }
+        view.mouseUp(with: mouse(.leftMouseUp, view, end))
+    }
+
+    private static func click(_ view: NSView, at point: CGPoint, clicks: Int = 1) {
+        view.mouseDown(with: mouse(.leftMouseDown, view, point, clicks: clicks))
+        view.mouseUp(with: mouse(.leftMouseUp, view, point, clicks: clicks))
+    }
+
+    /// A small architecture diagram, for the README screenshot.
+    private static func showcaseScene() -> BoardScene {
+        var elements: [BoardElement] = []
+        func node(_ kind: BoardElement.Kind, _ label: String, _ x: Double, _ y: Double, _ w: Double, _ h: Double, _ color: String, fill: String = "hachure") -> String {
+            var shape = BoardElement(type: kind, x: x, y: y, width: w, height: h)
+            shape.backgroundColor = color
+            shape.fillStyle = fill
+            var text = BoardElement(type: .text, x: x, y: y)
+            text.text = label
+            text.originalText = label
+            text.containerId = shape.id
+            text.textAlign = "center"
+            let size = BoardRenderer.measure(text)
+            text.width = size.width
+            text.height = size.height
+            shape.boundElements = [.init(id: text.id, type: "text")]
+            elements += [shape, text]
+            return shape.id
+        }
+        func link(_ from: String, _ to: String, dashed: Bool = false, color: String = "#1e1e1e") {
+            var arrow = BoardElement(type: .arrow, x: 0, y: 0)
+            arrow.setAbsolutePoints([.zero, CGPoint(x: 1, y: 1)])
+            arrow.startBinding = .init(elementId: from)
+            arrow.endBinding = .init(elementId: to)
+            arrow.strokeColor = color
+            if dashed { arrow.strokeStyle = "dashed" }
+            elements.append(arrow)
+        }
+        var title = BoardElement(type: .text, x: 0, y: -10)
+        title.text = "Checkout — architecture"
+        title.fontSize = 34
+        let titleSize = BoardRenderer.measure(title)
+        title.width = titleSize.width
+        title.height = titleSize.height
+        elements.append(title)
+        var underline = BoardElement(type: .freedraw, x: 0, y: 40)
+        underline.strokeColor = "#e03131"
+        underline.setAbsolutePoints((0...24).map { CGPoint(x: Double($0) * 16, y: 44 + sin(Double($0) * 0.6) * 3) })
+        elements.append(underline)
+
+        let app = node(.rectangle, "Mobile app", 0, 110, 170, 80, "#a5d8ff")
+        let gateway = node(.rectangle, "API Gateway", 290, 110, 190, 80, "#ffec99", fill: "solid")
+        let auth = node(.diamond, "Auth?", 600, 90, 160, 120, "#ffc9c9")
+        let orders = node(.rectangle, "Orders service", 290, 290, 190, 80, "#b2f2bb")
+        let payments = node(.rectangle, "Payments", 600, 290, 160, 80, "#d0bfff", fill: "cross-hatch")
+        let database = node(.ellipse, "Postgres", 300, 460, 170, 90, "#a5d8ff", fill: "solid")
+        link(app, gateway)
+        link(gateway, auth)
+        link(auth, gateway, dashed: true, color: "#e03131")
+        link(gateway, orders)
+        link(orders, payments)
+        link(orders, database)
+        var note = BoardElement(type: .text, x: 640, y: 450)
+        note.text = "idempotency keys\non every payment!"
+        note.strokeColor = "#e03131"
+        note.fontSize = 20
+        let noteSize = BoardRenderer.measure(note)
+        note.width = noteSize.width
+        note.height = noteSize.height
+        elements.append(note)
+
+        var scene = BoardScene(elements: elements)
+        BoardGeometry.updateBindings(in: &scene, moved: Set(elements.map(\.id)))
+        // Two arrows between the same shapes: bend the dashed one so both show.
+        if let index = scene.elements.firstIndex(where: { $0.strokeStyle == "dashed" }) {
+            var points = scene.elements[index].absolutePoints
+            if points.count == 2 {
+                let mid = CGPoint(x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 + 46)
+                points.insert(mid, at: 1)
+                scene.elements[index].setAbsolutePoints(points)
+                BoardGeometry.updateBindings(in: &scene, moved: [auth, gateway])
+            }
+        }
+        return scene
+    }
+
     private static func tab(named name: String) -> Tab? {
         controller.tabs.first { $0.document.url?.lastPathComponent == name }
     }
@@ -110,6 +209,8 @@ enum SelfTest {
 
     static func run(_ controller: MainWindowController) {
         self.controller = controller
+        // Screenshots in light mode regardless of the system setting.
+        if CommandLine.arguments.contains("--light") { NSApp.appearance = NSAppearance(named: .aqua) }
         let arguments = CommandLine.arguments
         if let index = arguments.firstIndex(of: "--selftest-restore") {
             workspace = URL(fileURLWithPath: arguments[index + 1])
@@ -570,6 +671,108 @@ enum SelfTest {
             check(tab(named: "style.css")?.document.isDirty == false, "reloaded tab is not marked modified")
         }
 
+        // Whiteboard: real mouse events on the canvas.
+        step("new whiteboard") {
+            controller.newWhiteboard(nil)
+        }
+        step("draw shapes") {
+            guard let board = controller.activeTab?.editor as? BoardEditor else {
+                check(false, "New Whiteboard opens a board editor")
+                return
+            }
+            check(true, "New Whiteboard opens a board editor")
+            check(controller.formatBar.isHidden, "no formatting bar on a whiteboard")
+            let canvas = board.canvas
+            canvas.tool = .rectangle
+            drag(canvas, from: CGPoint(x: 150, y: 150), to: CGPoint(x: 330, y: 250))
+            canvas.tool = .ellipse
+            drag(canvas, from: CGPoint(x: 520, y: 160), to: CGPoint(x: 700, y: 260))
+            let kinds = canvas.scene.visible.map(\.type)
+            check(kinds == [.rectangle, .ellipse], "dragging with the rectangle and ellipse tools draws them (\(kinds))")
+            check(canvas.tool == .select, "after drawing a shape the tool goes back to selection")
+            canvas.tool = .arrow
+            drag(canvas, from: CGPoint(x: 334, y: 200), to: CGPoint(x: 516, y: 210))
+            let arrow = canvas.scene.visible.first { $0.type == .arrow }
+            let box = canvas.scene.visible.first { $0.type == .rectangle }
+            let ellipse = canvas.scene.visible.first { $0.type == .ellipse }
+            check(arrow?.startBinding?.elementId == box?.id && arrow?.endBinding?.elementId == ellipse?.id, "an arrow drawn between two shapes sticks to both")
+        }
+        step("label in shape") {
+            guard let canvas = (controller.activeTab?.editor as? BoardEditor)?.canvas else { return }
+            click(canvas, at: CGPoint(x: 240, y: 200), clicks: 2)
+            canvas.editingText?.insertText("API", replacementRange: NSRange(location: NSNotFound, length: 0))
+            canvas.commitTextEditing()
+            let box = canvas.scene.visible.first { $0.type == .rectangle }
+            let label = canvas.scene.visible.first { $0.type == .text }
+            check(label?.text == "API" && label?.containerId == box?.id, "double-click in a shape writes text inside it")
+            check(box?.boundElements?.contains { $0.id == label?.id } == true, "the shape knows its label (Excalidraw boundElements)")
+        }
+        step("move shape") {
+            guard let canvas = (controller.activeTab?.editor as? BoardEditor)?.canvas,
+                  let before = canvas.scene.visible.first(where: { $0.type == .arrow })?.absolutePoints.last else { return }
+            // Grabbed by its top edge: on the left side the attached arrow is on top of it.
+            drag(canvas, from: CGPoint(x: 610, y: 160), to: CGPoint(x: 610, y: 300))
+            let ellipse = canvas.scene.visible.first { $0.type == .ellipse }
+            let after = canvas.scene.visible.first { $0.type == .arrow }?.absolutePoints.last
+            check(abs((ellipse?.y ?? 0) - 260) < 2, "dragging the ellipse moves it (y \(Int(ellipse?.y ?? 0)))")
+            check((after?.y ?? 0) > before.y + 60, "the arrow follows the shape it's attached to")
+        }
+        step("board undo") {
+            guard let canvas = (controller.activeTab?.editor as? BoardEditor)?.canvas else { return }
+            let manager = controller.activeTab?.document.undoManager
+            check(manager?.groupingLevel == 0, "no undo group left open on the board")
+            manager?.undo()
+            let ellipse = canvas.scene.visible.first { $0.type == .ellipse }
+            check(abs((ellipse?.y ?? 0) - 120) < 2, "undo puts the ellipse back in one step")
+            canvas.tool = .draw
+            drag(canvas, from: CGPoint(x: 160, y: 380), to: CGPoint(x: 400, y: 420), steps: 12)
+            check(canvas.scene.visible.contains { $0.type == .freedraw && ($0.points?.count ?? 0) > 5 }, "the pencil draws a free stroke")
+        }
+        step("board copy") {
+            guard let canvas = (controller.activeTab?.editor as? BoardEditor)?.canvas else { return }
+            canvas.selectAll(nil)
+            canvas.copy(nil)
+            check(NSPasteboard.general.string(forType: .string)?.contains("excalidraw/clipboard") == true, "copied elements use Excalidraw's clipboard format")
+            check(canvas.pngData().map { $0.count > 5_000 } == true, "the board exports as PNG")
+            screenshot("19-whiteboard-test")
+        }
+        step("board save") {
+            guard let tab = controller.activeTab else { return }
+            let url = workspace.appendingPathComponent("docs/flow.excalidraw")
+            controller.write(tab, to: url) { saved in check(saved, "saved flow.excalidraw") }
+            let json = (try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: Any]
+            check(json?["type"] as? String == "excalidraw" && (json?["elements"] as? [Any])?.count == 5, "the file is Excalidraw JSON with the 5 elements")
+            controller.closeActiveTab(nil)
+            controller.open(url)
+        }
+        step("board reopened") {
+            let scene = controller.activeTab?.document.board
+            let arrow = scene?.visible.first { $0.type == .arrow }
+            check(controller.activeTab?.editor is BoardEditor && scene?.visible.count == 5, "reopening flow.excalidraw brings back the board")
+            check(arrow?.startBinding != nil && arrow?.endBinding != nil, "the arrow is still attached after reopening")
+        }
+        step("showcase board") {
+            controller.newWhiteboard(nil)
+            guard let tab = controller.activeTab, let board = tab.editor as? BoardEditor else { return }
+            board.canvas.change { $0 = showcaseScene() }
+            check(board.canvas.clipsToBounds || ProcessInfo.processInfo.operatingSystemVersion.majorVersion < 14, "the canvas stays inside its pane")
+            // Its own window, so the diagram gets the whole width.
+            controller.tearOff(tab, at: nil)
+        }
+        step("showcase fit") {
+            guard let window = MainWindowController.all.last, window !== controller,
+                  let board = window.activeTab?.editor as? BoardEditor else { return }
+            window.window?.setFrame(controller.window?.frame ?? .zero, display: true)
+            window.setSidebarCollapsed(true, animated: false)
+            board.canvas.zoomToFit()
+        }
+        step("showcase shot") {
+            if let window = MainWindowController.all.last, window !== controller { captureWindow(window, as: "20-whiteboard") }
+        }
+        step("showcase close") {
+            if let window = MainWindowController.all.last, window !== controller { window.closeWindow() }
+        }
+
         // Two dirty files, then quit.
         step("dirty two files") {
             for name in ["index.ts", "query.sql"] {
@@ -577,10 +780,11 @@ enum SelfTest {
                 controller.activate(index)
                 tab.editor?.textView.insertText("// edit\n", replacementRange: NSRange(location: 0, length: 0))
             }
-            check(controller.tabs.filter { $0.document.isDirty }.count == 2, "two tabs show the dirty dot")
+            check(controller.tabs.filter { $0.document.isDirty && $0.document.url != nil }.count == 2, "two tabs show the dirty dot")
             screenshot("09-dirty-tabs")
             Session.save(controller)
-            controller.confirmCloseAll { proceed in check(proceed, "both prompts answered") }
+            // As on quit: untitled documents (the demo board) are kept, not asked about.
+            controller.confirmCloseAll(includeUntitled: false) { proceed in check(proceed, "both prompts answered") }
         }
         step("first prompt") {
             let text = sheetText()
