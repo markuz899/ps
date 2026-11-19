@@ -366,21 +366,24 @@ final class FolderSearchController: NSViewController, NSOutlineViewDataSource, N
     }
 }
 
-/// Sidebar: Explorer and Search panes behind a segmented switch.
+/// Sidebar: Explorer, Search and Git Graph panes behind a segmented switch.
 final class SidebarController: NSViewController {
     let tree = FileTreeController()
     let search = FolderSearchController()
+    let graph = GitGraphController()
     var onClose: (() -> Void)?
     private let switcher = NSSegmentedControl()
     private let closeButton = NSButton()
     private let container = NSView()
 
     override func loadView() {
-        switcher.segmentCount = 2
+        switcher.segmentCount = 3
         switcher.setImage(NSImage(systemSymbolName: "folder", accessibilityDescription: L("Explorer")), forSegment: 0)
         switcher.setImage(NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: L("Search")), forSegment: 1)
+        switcher.setImage(NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: L("Git Graph")), forSegment: 2)
         switcher.setToolTip(L("Explorer") + " (⇧⌘E)", forSegment: 0)
         switcher.setToolTip(L("Search") + " (⇧⌘F)", forSegment: 1)
+        switcher.setToolTip(L("Git Graph"), forSegment: 2)
         switcher.selectedSegment = 0
         switcher.segmentStyle = .automatic
         switcher.target = self
@@ -417,6 +420,7 @@ final class SidebarController: NSViewController {
         view = root
         addChild(tree)
         addChild(search)
+        addChild(graph)
         show(tree)
     }
 
@@ -438,7 +442,11 @@ final class SidebarController: NSViewController {
     }
 
     @objc private func switched() {
-        switcher.selectedSegment == 0 ? showExplorer() : showSearch()
+        switch switcher.selectedSegment {
+        case 1: showSearch()
+        case 2: showGraph()
+        default: showExplorer()
+        }
     }
 
     func showExplorer() {
@@ -450,5 +458,10 @@ final class SidebarController: NSViewController {
         switcher.selectedSegment = 1
         show(search)
         search.focus()
+    }
+
+    func showGraph() {
+        switcher.selectedSegment = 2
+        show(graph)
     }
 }

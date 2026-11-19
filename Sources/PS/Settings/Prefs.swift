@@ -44,6 +44,8 @@ enum Prefs {
         static let boardRoughness = "boardRoughness"
         static let boardFont = "boardFont"
         static let showMinimap = "showMinimap"
+        /// Menu shortcuts are customizable: "shortcut.<id>" = "<key>|<modifierRawValue>".
+        static let shortcutPrefix = "shortcut."
     }
 
     static let defaults = UserDefaults.standard
@@ -128,6 +130,27 @@ enum Prefs {
         let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let name = defaults.string(forKey: dark ? Key.darkTheme : Key.lightTheme) ?? ""
         return ThemeStore.theme(named: name, dark: dark)
+    }
+
+    // MARK: Customizable shortcuts
+
+    /// The stored shortcut for `id`, or the default when never customized.
+    static func shortcut(id: String, defaultKey: String, defaultModifiers: NSEvent.ModifierFlags) -> (key: String, modifiers: NSEvent.ModifierFlags) {
+        guard let stored = defaults.string(forKey: Key.shortcutPrefix + id),
+              let bar = stored.lastIndex(of: "|") else {
+            return (defaultKey, defaultModifiers)
+        }
+        let key = String(stored[..<bar])
+        let raw = UInt(stored[stored.index(after: bar)...]) ?? UInt(defaultModifiers.rawValue)
+        return (key, NSEvent.ModifierFlags(rawValue: raw))
+    }
+
+    static func setShortcut(id: String, key: String, modifiers: NSEvent.ModifierFlags) {
+        defaults.set("\(key)|\(modifiers.rawValue)", forKey: Key.shortcutPrefix + id)
+    }
+
+    static func resetShortcut(id: String) {
+        defaults.removeObject(forKey: Key.shortcutPrefix + id)
     }
 
     /// Everything that affects editors; used to skip work on unrelated defaults changes.

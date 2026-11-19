@@ -184,6 +184,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
 
     fileprivate let split = NSSplitViewController()
     let sidebar = SidebarController()
+    let gitDetail = GitCommitDetailController()
+    private(set) var gitDetailItem: NSSplitViewItem?
     private let editorArea = NSViewController()
     fileprivate let paneSplit = PaneContainer()
     fileprivate let mainContainer = NSView()
@@ -260,6 +262,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
 
     private func buildLayout() {
         sidebar.tree.delegate = self
+        sidebar.graph.delegate = self
+        gitDetail.delegate = self
         sidebar.onClose = { [weak self] in self?.setSidebarCollapsed(true) }
         sidebar.search.onOpen = { [weak self] match in
             self?.open(match.url) { tab in
@@ -315,8 +319,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         sidebarItem.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
         let editorItem = NSSplitViewItem(viewController: editorArea)
         editorItem.titlebarSeparatorStyle = .line
+        let detailItem = NSSplitViewItem(viewController: gitDetail)
+        detailItem.canCollapse = true
+        detailItem.isCollapsed = true
+        detailItem.minimumThickness = 220
+        detailItem.maximumThickness = 460
+        detailItem.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
+        gitDetailItem = detailItem
         split.addSplitViewItem(sidebarItem)
         split.addSplitViewItem(editorItem)
+        split.addSplitViewItem(detailItem)
         split.splitView.autosaveName = "PSSplit"
         contentViewController = split
         window?.setContentSize(NSSize(width: 1180, height: 760))
@@ -669,7 +681,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         if focusMode { pane.findBar.hide() }
     }
 
-    private func addTab(_ document: Document, in target: Pane? = nil) -> Tab {
+    func addTab(_ document: Document, in target: Pane? = nil) -> Tab {
         let pane = target ?? activePane!
         let tab = Tab(document: document)
         tab.pane = pane
@@ -878,6 +890,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         folder = url.standardizedFileURL
         sidebar.tree.setRoot(folder)
         sidebar.search.root = folder
+        sidebar.graph.root = folder
         quickOpen.invalidateIndex()
         split.splitViewItems.first?.animator().isCollapsed = false
         Recents.add(url)
@@ -918,6 +931,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         sidebar.tree.setRoot(nil)
         sidebar.search.root = nil
         sidebar.search.reset()
+        sidebar.graph.root = nil
+        setGitDetailCollapsed(true)
         quickOpen.invalidateIndex()
         updateWatchedPaths()
         updateChrome()
@@ -1114,6 +1129,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
 
     private func filesChanged(_ paths: [String]) {
         sidebar.tree.filesChanged(paths)
+        if let folder, paths.contains(where: { $0 == folder.path + "/.git" || $0.hasPrefix(folder.path + "/.git/") }) {
+            sidebar.graph.notifyRepoChanged()
+        }
         quickOpen.invalidateIndex()
         checkExternalChanges()
     }

@@ -100,6 +100,7 @@ enum Session {
     private static func state(of controller: MainWindowController) -> [String: Any] {
         let panes: [[String: Any]] = controller.panes.map { pane in
             let tabs: [[String: Any]] = pane.tabs.compactMap { tab in
+                guard !tab.document.isReadOnly else { return nil }
                 let cursor = tab.editor?.textView.selectedRange().location ?? 0
                 let document = tab.document
                 guard let url = document.url else {
