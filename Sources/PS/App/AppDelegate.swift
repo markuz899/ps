@@ -10,13 +10,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             ?? (NSApp.mainWindow?.windowController as? MainWindowController)
             ?? controllers.first
     }
-    private var settingsWindow: NSWindow?
+    private(set) var settingsWindow: NSWindow?
     private var pendingOpen: [URL] = []
     private var launched = false
     private let recentMenu = NSMenu(title: L("Open Recent"))
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         Prefs.register()
+        Prefs.applyAppearance()
         NSApp.mainMenu = buildMainMenu()
     }
 
@@ -37,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         }
         let files = pendingOpen
         pendingOpen = []
-        if files.isEmpty {
+        if files.isEmpty, Prefs.restoreSession {
             Session.restore(into: controller) {}
         } else {
             files.forEach { controller.open($0) }

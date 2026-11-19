@@ -12,6 +12,8 @@ protocol TabBarDelegate: AnyObject {
     func tabBar(_ bar: TabBar, acceptDropAt index: Int) -> Bool
     /// The drag ended outside every window of the app.
     func tabBar(_ bar: TabBar, draggedOutsideTo screenPoint: NSPoint)
+    /// "+" after the tabs (or a double-click on the empty bar): a new document here.
+    func tabBar(_ bar: TabBar, newDocument mode: EditorMode)
 }
 
 extension NSPasteboard.PasteboardType {
@@ -75,6 +77,10 @@ final class TabBar: NSView, NSDraggingSource {
     private(set) var selectedIndex = -1
     private var dragging: (item: TabItemView, offset: CGFloat, startIndex: Int)?
     private let dropIndicator = NSView()
+    private let leftFade = EdgeFade(leading: true)
+    private let rightFade = EdgeFade(leading: false)
+    /// Sublime Text-style "+" right after the last tab.
+    let addButton = NSButton()
     /// Kept alive until the session ends: the drop may remove this bar's pane.
     private static var activeSource: TabBar?
     /// With several panes, only the focused one shows the accent colour.
@@ -100,11 +106,50 @@ final class TabBar: NSView, NSDraggingSource {
             scrollView.topAnchor.constraint(equalTo: topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        for fade in [leftFade, rightFade] {
+            fade.translatesAutoresizingMaskIntoConstraints = false
+            fade.isHidden = true
+            addSubview(fade)
+        }
+        NSLayoutConstraint.activate([
+            leftFade.leadingAnchor.constraint(equalTo: leadingAnchor),
+            leftFade.topAnchor.constraint(equalTo: topAnchor),
+            leftFade.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
+            leftFade.widthAnchor.constraint(equalToConstant: 28),
+            rightFade.trailingAnchor.constraint(equalTo: trailingAnchor),
+            rightFade.topAnchor.constraint(equalTo: topAnchor),
+            rightFade.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
+            rightFade.widthAnchor.constraint(equalToConstant: 28),
+        ])
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
         dropIndicator.wantsLayer = true
         dropIndicator.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
         dropIndicator.layer?.cornerRadius = 1.5
         dropIndicator.isHidden = true
         content.addSubview(dropIndicator)
+
+        addButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: L("New File"))?
+            .withSymbolConfiguration(.init(pointSize: 11, weight: .medium))
+        addButton.isBordered = false
+        addButton.contentTintColor = .secondaryLabelColor
+        addButton.toolTip = L("New File (⌘N) — right-click for other kinds")
+        addButton.setAccessibilityLabel(L("New File"))
+        addButton.target = self
+        addButton.action = #selector(addPressed)
+        let menu = NSMenu()
+        for (title, symbol, mode) in [(L("New File"), "chevron.left.forwardslash.chevron.right", EditorMode.code),
+                                      (L("New Text Document"), "doc.richtext", .rich),
+                                      (L("New Whiteboard"), "scribble.variable", .board)] {
+            let item = ClosureMenuItem(title: title) { [weak self] in
+                guard let self else { return }
+                self.delegate?.tabBar(self, newDocument: mode)
+            }
+            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            menu.addItem(item)
+        }
+        addButton.menu = menu
+        content.addSubview(addButton)
         registerForDraggedTypes([.psTab])
         setAccessibilityElement(true)
         setAccessibilityRole(.tabGroup)
@@ -143,10 +188,20 @@ final class TabBar: NSView, NSDraggingSource {
         layoutItems(animated: false)
     }
 
+    /// Width a tab gets: its natural width, or less when the tabs don't fit the pane
+    /// (titles then end in "…", like browser tabs). Below the minimum, the bar scrolls.
+    private func fittedWidth(_ item: TabItemView) -> CGFloat {
+        let available = scrollView.contentSize.width - 36
+        let total = items.reduce(0) { $0 + $1.preferredWidth }
+        guard total > available, !items.isEmpty else { return item.preferredWidth }
+        let share = max(TabItemView.minimumWidth, floor(available / CGFloat(items.count)))
+        return min(item.preferredWidth, share)
+    }
+
     private func layoutItems(animated: Bool) {
         var x: CGFloat = 0
         for item in items {
-            let frame = NSRect(x: x, y: 0, width: item.preferredWidth, height: TabBar.height - 1)
+            let frame = NSRect(x: x, y: 0, width: fittedWidth(item), height: TabBar.height - 1)
             x += frame.width
             if item === dragging?.item { continue }
             if animated {
@@ -155,7 +210,42 @@ final class TabBar: NSView, NSDraggingSource {
                 item.frame = frame
             }
         }
+        addButton.frame = NSRect(x: x + 2, y: 0, width: 32, height: TabBar.height - 1)
+        x += 36
         content.frame = NSRect(x: 0, y: 0, width: max(x, scrollView.contentSize.width), height: TabBar.height - 1)
+        updateFades()
+    }
+
+    /// Soft fade where tabs continue out of sight, instead of a hard cut at the pane edge.
+    private func updateFades() {
+        let visible = scrollView.contentView.bounds
+        leftFade.isHidden = visible.minX <= 1
+        rightFade.isHidden = visible.maxX >= content.frame.width - 1
+    }
+
+    @objc private func scrolled() {
+        updateFades()
+    }
+
+    /// Tabs whose end is hidden by the pane edge although they could still shrink.
+    var hasClippedTabs: Bool {
+        let visible = scrollView.contentView.bounds.maxX
+        return items.contains { $0.frame.maxX > visible + 0.5 && $0.frame.width > TabItemView.minimumWidth + 0.5 }
+    }
+
+    var tabCount: Int { items.count }
+
+    @objc private func addPressed() {
+        delegate?.tabBar(self, newDocument: .code)
+    }
+
+    /// Double-click on the empty part of the bar: a new file, as in Sublime Text and VS Code.
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            delegate?.tabBar(self, newDocument: .code)
+            return
+        }
+        super.mouseDown(with: event)
     }
 
     fileprivate func index(of item: TabItemView) -> Int? {
@@ -198,8 +288,8 @@ final class TabBar: NSView, NSDraggingSource {
         var position: CGFloat = 0
         // Final index = how many of the other tabs have their midpoint left of the dragged one.
         for item in items where item !== drag.item {
-            if center > position + item.preferredWidth / 2 { target += 1 }
-            position += item.preferredWidth
+            if center > position + fittedWidth(item) / 2 { target += 1 }
+            position += fittedWidth(item)
         }
         if target != current {
             let moved = items.remove(at: current)
@@ -301,6 +391,27 @@ final class TabBar: NSView, NSDraggingSource {
     }
 }
 
+/// Gradient from transparent to the bar's background, drawn over the tabs' edge.
+private final class EdgeFade: NSView {
+    private let leading: Bool
+
+    init(leading: Bool) {
+        self.leading = leading
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let background = NSColor.windowBackgroundColor.blended(withFraction: 0.04, of: .black) ?? .windowBackgroundColor
+        NSGradient(starting: background.withAlphaComponent(0), ending: background)?.draw(in: bounds, angle: leading ? 180 : 0)
+    }
+}
+
 final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
@@ -339,6 +450,8 @@ final class TabItemView: NSView {
         fatalError("init(coder:) is not used")
     }
 
+    static let minimumWidth: CGFloat = 76
+
     var preferredWidth: CGFloat {
         let text = title.attributedStringValue.size().width
         return min(280, max(110, ceil(text) + 74))
@@ -366,7 +479,9 @@ final class TabItemView: NSView {
         let height = bounds.height
         icon.frame = NSRect(x: 12, y: (height - 14) / 2, width: 14, height: 14)
         closeButton.frame = NSRect(x: bounds.width - 26, y: (height - 18) / 2, width: 18, height: 18)
-        title.frame = NSRect(x: 31, y: (height - 16) / 2, width: bounds.width - 31 - 30, height: 16)
+        // Narrow tabs give the close button's room to the title unless it's showing.
+        let closeRoom: CGFloat = bounds.width < 120 && closeButton.alphaValue == 0 ? 8 : 30
+        title.frame = NSRect(x: 31, y: (height - 16) / 2, width: bounds.width - 31 - closeRoom, height: 16)
     }
 
     func refreshAppearance() {
@@ -382,6 +497,7 @@ final class TabItemView: NSView {
         closeButton.image = NSImage(systemSymbolName: name, accessibilityDescription: L("Close"))?.withSymbolConfiguration(configuration)
         closeButton.contentTintColor = dirty && !hovering ? .labelColor : .secondaryLabelColor
         closeButton.alphaValue = showClose || dirty ? 1 : 0
+        needsLayout = true
         title.textColor = isSelected && bar.isActivePane ? .labelColor : .secondaryLabelColor
         setAccessibilityValue(isSelected ? 1 : 0)
         needsDisplay = true

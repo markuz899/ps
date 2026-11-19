@@ -75,6 +75,10 @@ final class Pane: NSObject, TabBarDelegate {
     func tabBar(_ bar: TabBar, close index: Int) { owner.closeTab(tabs[index]) }
     func tabBar(_ bar: TabBar, menuFor index: Int) -> NSMenu { owner.tabMenu(for: tabs[index]) }
 
+    func tabBar(_ bar: TabBar, newDocument mode: EditorMode) {
+        owner.newDocument(mode, in: self)
+    }
+
     func tabBar(_ bar: TabBar, beginDraggingTabAt index: Int) {
         TabDrag.tab = tabs[index]
     }
@@ -1182,6 +1186,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         let signature = Prefs.signature
         configureAutosave()
         guard signature != preferenceSignature else { return }
+        Prefs.applyAppearance()
         let hiddenChanged = signature.split(separator: "|").last != preferenceSignature.split(separator: "|").last
         preferenceSignature = signature
         for tab in tabs where tab.document.mode == .code {
@@ -1348,6 +1353,12 @@ extension MainWindowController: NSMenuItemValidation {
 
     @objc func newRichDocument(_ sender: Any?) {
         _ = addTab(Document(mode: .rich))
+    }
+
+    /// A new untitled document in a given pane (the tab bar's "+").
+    func newDocument(_ mode: EditorMode, in pane: Pane) {
+        let tab = addTab(Document(mode: mode), in: pane)
+        if mode == .code { tab.editor?.applyPreferences() }
     }
 
     @objc func newWhiteboard(_ sender: Any?) {
