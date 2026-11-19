@@ -86,6 +86,7 @@ final class CodeEditor: NSObject, DocumentEditor, NSTextViewDelegate {
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(editorScrolled), name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
         highlighter.onPainted = { [weak self] in self?.minimap.needsDisplay = true }
+        refreshGitChanges()
 
         let view = codeView
         view.delegate = self
@@ -118,6 +119,22 @@ final class CodeEditor: NSObject, DocumentEditor, NSTextViewDelegate {
     func cursorsChanged() {
         onSelectionChange?()
     }
+
+    /// Re-reads which lines differ from git HEAD (after opening, saving, committing…).
+    func refreshGitChanges() {
+        guard let url = document.url else {
+            ruler.gitChanges = nil
+            return
+        }
+        let folder = url.deletingLastPathComponent()
+        let name = url.lastPathComponent
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let changes = GitClient.lineChanges(folder, path: name)
+            DispatchQueue.main.async { self?.ruler.gitChanges = changes }
+        }
+    }
+
+    var gitChanges: GitLineChanges? { ruler.gitChanges }
 
     @objc private func editorScrolled() {
         minimap.needsDisplay = true
@@ -253,6 +270,10 @@ final class LineNumberRuler: NSRulerView {
     private var activeColor = NSColor.secondaryLabelColor
     private var background = NSColor.textBackgroundColor
     private var digits = 0
+    /// Lines changed against git HEAD: coloured bars at the gutter's left edge.
+    var gitChanges: GitLineChanges? {
+        didSet { if gitChanges != oldValue { needsDisplay = true } }
+    }
 
     init(textView: NSTextView, document: Document) {
         self.textView = textView
@@ -324,6 +345,23 @@ final class LineNumberRuler: NSRulerView {
                 let size = label.size(withAttributes: attributes)
                 let baselineOffset = (min(fragment.height, lineHeight * 1.4) - size.height) / 2
                 label.draw(at: NSPoint(x: ruleThickness - size.width - 10, y: y + max(0, baselineOffset)), withAttributes: attributes)
+                if let gitChanges {
+                    if gitChanges.added.contains(line) || gitChanges.modified.contains(line) {
+                        (gitChanges.added.contains(line) ? NSColor.systemGreen : NSColor.systemBlue).withAlphaComponent(0.75).setFill()
+                        NSRect(x: 1, y: y, width: 3, height: fragment.height).fill()
+                    }
+                    if gitChanges.deletedAfter.contains(line) || (line == 0 && gitChanges.deletedAfter.contains(-1)) {
+                        // A small red wedge on the line boundary where text was removed.
+                        let edge = line == 0 && gitChanges.deletedAfter.contains(-1) ? y : y + fragment.height
+                        let wedge = NSBezierPath()
+                        wedge.move(to: NSPoint(x: 0, y: edge - 4))
+                        wedge.line(to: NSPoint(x: 6, y: edge))
+                        wedge.line(to: NSPoint(x: 0, y: edge + 4))
+                        wedge.close()
+                        NSColor.systemRed.withAlphaComponent(0.8).setFill()
+                        wedge.fill()
+                    }
+                }
             }
             line += 1
         }

@@ -68,7 +68,9 @@ struct SettingsView: View {
         }
     }
 
-    @State private var section: Section? = .general
+    /// Section to open with, for a window created by "Keyboard Shortcuts…".
+    static var initialSection: Section = .general
+    @State private var section: Section? = SettingsView.initialSection
 
     var body: some View {
         NavigationSplitView {
@@ -106,6 +108,9 @@ struct SettingsView: View {
             .navigationTitle((section ?? .general).title)
         }
         .frame(width: SettingsHost.size.width, height: SettingsHost.size.height)
+        .onReceive(NotificationCenter.default.publisher(for: .psShowSettingsSection)) { note in
+            if let raw = note.object as? String, let target = Section(rawValue: raw) { section = target }
+        }
     }
 }
 
@@ -517,10 +522,18 @@ private struct AboutPane: View {
 
 // MARK: - Keyboard shortcuts
 
+extension Notification.Name {
+    /// Object: a `SettingsView.Section` raw value to show.
+    static let psShowSettingsSection = Notification.Name("PSShowSettingsSection")
+}
+
 struct ShortcutEntry: Identifiable, Hashable {
     let title: String
     let keys: String
-    var id: String { title + keys }
+    /// Menu command id when the shortcut can be changed; nil for fixed gestures and tools.
+    var menuID: String? = nil
+    var isCustomized = false
+    var id: String { menuID ?? (title + keys) }
 }
 
 struct ShortcutGroup: Identifiable {
@@ -538,14 +551,16 @@ enum ShortcutCatalog {
             guard let menu = top.submenu else { continue }
             var entries: [ShortcutEntry] = []
             func walk(_ menu: NSMenu, prefix: String) {
-                for item in menu.items where !item.isSeparatorItem {
+                for item in menu.items where !item.isSeparatorItem && !item.isHidden {
                     if let submenu = item.submenu {
                         walk(submenu, prefix: prefix + item.title + " › ")
                         continue
                     }
                     let keys = MainWindowController.shortcut(of: item)
-                    guard !keys.isEmpty, !item.isHidden else { continue }
-                    entries.append(ShortcutEntry(title: prefix + item.title, keys: keys))
+                    let id = item.identifier?.rawValue
+                    // Commands without a shortcut are listed too, so one can be given.
+                    guard !keys.isEmpty || (id != nil && AppDelegate.defaultShortcuts[id!] != nil) else { continue }
+                    entries.append(ShortcutEntry(title: prefix + item.title, keys: keys, menuID: id, isCustomized: id.map(Prefs.hasCustomShortcut) ?? false))
                 }
             }
             walk(menu, prefix: "")
@@ -560,6 +575,7 @@ enum ShortcutCatalog {
             ShortcutEntry(title: L("Move a tab to another pane or window"), keys: L("drag it out of the bar")),
         ]))
         groups.append(ShortcutGroup(title: L("Code editing"), entries: [
+            ShortcutEntry(title: L("Go to the definition under the pointer"), keys: L("⌘ click")),
             ShortcutEntry(title: L("Indent / outdent the selection"), keys: "⇥ / ⇧⇥"),
             ShortcutEntry(title: L("Add a caret"), keys: L("⌥ click")),
             ShortcutEntry(title: L("Back to one caret"), keys: "⎋"),
@@ -581,11 +597,41 @@ enum ShortcutCatalog {
         ]))
         return groups
     }
+
+    /// The menu command already using a key combination, if any.
+    static func owner(of key: String, modifiers: NSEvent.ModifierFlags, except id: String) -> String? {
+        var found: String?
+        func walk(_ menu: NSMenu, prefix: String) {
+            for item in menu.items where found == nil {
+                if let submenu = item.submenu { walk(submenu, prefix: prefix + item.title + " › "); continue }
+                guard item.identifier?.rawValue != id, !item.keyEquivalent.isEmpty else { continue }
+                let mask: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
+                if item.keyEquivalent.lowercased() == key.lowercased(), item.keyEquivalentModifierMask.intersection(mask) == modifiers.intersection(mask) {
+                    found = prefix + item.title
+                }
+            }
+        }
+        for top in NSApp.mainMenu?.items ?? [] { if let menu = top.submenu { walk(menu, prefix: "") } }
+        return found
+    }
+
+    /// Turns a key press into a menu key equivalent. Nil for presses that can't be one
+    /// (a plain letter would stop you typing it).
+    static func keyEquivalent(from event: NSEvent) -> (key: String, modifiers: NSEvent.ModifierFlags)? {
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        guard let characters = event.charactersIgnoringModifiers?.lowercased(), let scalar = characters.unicodeScalars.first else { return nil }
+        let isFunctionKey = (0xF704...0xF70F).contains(scalar.value) // F1…F12
+        guard isFunctionKey || !modifiers.intersection([.command, .option, .control]).isEmpty else { return nil }
+        return (characters, modifiers)
+    }
 }
 
 private struct ShortcutsPane: View {
     @State private var query = ""
-    private let groups = ShortcutCatalog.groups()
+    @State private var groups = ShortcutCatalog.groups()
+    @State private var recording: String?
+    @State private var problem: String?
+    @State private var monitor: Any?
 
     private var filtered: [ShortcutGroup] {
         guard !query.isEmpty else { return groups }
@@ -607,7 +653,19 @@ private struct ShortcutsPane: View {
             }
             .padding(8)
             .background(Color(nsColor: .controlBackgroundColor).opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
-            .padding(.bottom, 14)
+            .padding(.bottom, 6)
+            HStack {
+                Text(L("Click a shortcut to change it: press the new keys, ⌫ removes it, ⎋ cancels."))
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button(L("Reset All")) { resetAll() }
+                    .disabled(!groups.contains { $0.entries.contains(where: \.isCustomized) })
+            }
+            .padding(.bottom, 12)
+            if let problem {
+                Label(problem, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout).foregroundStyle(.orange).padding(.bottom, 10)
+            }
             if filtered.isEmpty {
                 Text(L("No results")).foregroundStyle(.secondary).padding(.top, 20)
             }
@@ -615,18 +673,105 @@ private struct ShortcutsPane: View {
                 Card(group.title) {
                     ForEach(Array(group.entries.enumerated()), id: \.element.id) { index, entry in
                         if index > 0 { Divided() }
-                        HStack {
-                            Text(entry.title)
-                            Spacer(minLength: 12)
-                            KeyCaps(keys: entry.keys)
-                        }
-                        .padding(.vertical, 5)
+                        row(entry)
                     }
                 }
             }
-            Text(L("Shortcuts follow macOS conventions (and VS Code where they don't clash). They can't be changed yet."))
-                .font(.caption).foregroundStyle(.secondary)
         }
+        .onDisappear(perform: stopRecording)
+    }
+
+    @ViewBuilder
+    private func row(_ entry: ShortcutEntry) -> some View {
+        HStack {
+            Text(entry.title)
+            Spacer(minLength: 12)
+            if let id = entry.menuID {
+                if entry.isCustomized {
+                    Button { reset(id) } label: { Image(systemName: "arrow.uturn.backward.circle") }
+                        .buttonStyle(.plain).foregroundStyle(.secondary).help(L("Back to the default"))
+                }
+                Button { startRecording(id) } label: {
+                    if recording == id {
+                        Text(L("Type the shortcut…"))
+                            .font(.callout).foregroundStyle(Color.accentColor)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.accentColor))
+                    } else if entry.keys.isEmpty {
+                        Text("—").foregroundStyle(.tertiary).frame(minWidth: 22)
+                    } else {
+                        KeyCaps(keys: entry.keys)
+                    }
+                }
+                .buttonStyle(.plain)
+                .help(L("Change"))
+            } else {
+                KeyCaps(keys: entry.keys)
+            }
+        }
+        .padding(.vertical, 5)
+    }
+
+    private func startRecording(_ id: String) {
+        stopRecording()
+        problem = nil
+        recording = id
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            handle(event, id: id)
+            return nil
+        }
+    }
+
+    private func stopRecording() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        recording = nil
+    }
+
+    private func handle(_ event: NSEvent, id: String) {
+        let bare = event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty
+        if event.keyCode == 53, bare { // ⎋
+            stopRecording()
+            return
+        }
+        if event.keyCode == 51 || event.keyCode == 117, bare { // ⌫ / ⌦: no shortcut
+            Prefs.setShortcut(id: id, key: "", modifiers: [])
+            finish(id)
+            return
+        }
+        guard let combo = ShortcutCatalog.keyEquivalent(from: event) else {
+            problem = L("Use at least one of ⌘ ⌥ ⌃ (or a function key).")
+            NSSound.beep()
+            return
+        }
+        if let owner = ShortcutCatalog.owner(of: combo.key, modifiers: combo.modifiers, except: id) {
+            problem = L("That combination is already used by “%@”.", owner)
+            NSSound.beep()
+            return
+        }
+        Prefs.setShortcut(id: id, key: combo.key, modifiers: combo.modifiers)
+        finish(id)
+    }
+
+    private func finish(_ id: String) {
+        AppDelegate.applyShortcut(id: id)
+        stopRecording()
+        problem = nil
+        groups = ShortcutCatalog.groups()
+    }
+
+    private func reset(_ id: String) {
+        Prefs.resetShortcut(id: id)
+        finish(id)
+    }
+
+    private func resetAll() {
+        for id in AppDelegate.defaultShortcuts.keys where Prefs.hasCustomShortcut(id) {
+            Prefs.resetShortcut(id: id)
+            AppDelegate.applyShortcut(id: id)
+        }
+        problem = nil
+        groups = ShortcutCatalog.groups()
     }
 }
 

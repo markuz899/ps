@@ -185,6 +185,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
     fileprivate let split = NSSplitViewController()
     let sidebar = SidebarController()
     let gitDetail = GitCommitDetailController()
+    /// Declarations in the open folder, for ⌘-click and completion.
+    let symbols = SymbolIndex()
+    var symbolIndexReady = false
     private(set) var gitDetailItem: NSSplitViewItem?
     private let editorArea = NSViewController()
     fileprivate let paneSplit = PaneContainer()
@@ -263,6 +266,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
     private func buildLayout() {
         sidebar.tree.delegate = self
         sidebar.graph.delegate = self
+        sidebar.changes.delegate = self
         gitDetail.delegate = self
         sidebar.onClose = { [weak self] in self?.setSidebarCollapsed(true) }
         sidebar.search.onOpen = { [weak self] match in
@@ -891,6 +895,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         sidebar.tree.setRoot(folder)
         sidebar.search.root = folder
         sidebar.graph.root = folder
+        sidebar.changes.root = folder
+        rebuildSymbolIndex()
         quickOpen.invalidateIndex()
         split.splitViewItems.first?.animator().isCollapsed = false
         Recents.add(url)
@@ -932,6 +938,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         sidebar.search.root = nil
         sidebar.search.reset()
         sidebar.graph.root = nil
+        sidebar.changes.root = nil
+        rebuildSymbolIndex()
         setGitDetailCollapsed(true)
         quickOpen.invalidateIndex()
         updateWatchedPaths()
@@ -940,7 +948,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         Session.save(self)
     }
 
-    private func select(_ range: NSRange, in tab: Tab) {
+    func select(_ range: NSRange, in tab: Tab) {
         guard let view = tab.editor?.textView, NSMaxRange(range) <= (view.string as NSString).length else { return }
         view.setSelectedRange(range)
         view.scrollRangeToVisible(range)
@@ -1055,7 +1063,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
             try document.write(to: url, kind: kind)
             document.didSave(to: url)
             Recents.add(url)
-            if let editor = tab.editor as? CodeEditor { editor.applyPreferences() }
+            if let editor = tab.editor as? CodeEditor {
+                editor.applyPreferences()
+                editor.refreshGitChanges()
+            }
+            symbols.update(url)
+            sidebar.changes.refresh()
             updateWatchedPaths()
             updateStatus()
             Session.save(self)
@@ -1129,9 +1142,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
 
     private func filesChanged(_ paths: [String]) {
         sidebar.tree.filesChanged(paths)
-        if let folder, paths.contains(where: { $0 == folder.path + "/.git" || $0.hasPrefix(folder.path + "/.git/") }) {
-            sidebar.graph.notifyRepoChanged()
+        let isGit = { (path: String) in path.contains("/.git/") || path.hasSuffix("/.git") }
+        if paths.contains(where: isGit) {
+            refreshGitState()
         }
+        // Any change can alter `git status`; the panel refreshes in the background.
+        sidebar.changes.refresh()
+        symbols.update(paths.filter { !isGit($0) }.map { URL(fileURLWithPath: $0) }.filter {
+            var directory: ObjCBool = false
+            return !FileManager.default.fileExists(atPath: $0.path, isDirectory: &directory) || !directory.boolValue
+        })
         quickOpen.invalidateIndex()
         checkExternalChanges()
     }
@@ -1502,6 +1522,27 @@ extension MainWindowController: NSMenuItemValidation {
         panel.nameFieldStringValue = (tab.document.url?.deletingPathExtension().lastPathComponent ?? tab.document.displayName) + ".pdf"
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url, let self else { return }
+            self.writePDF(of: tab, to: url)
+        }
+    }
+
+    /// Boards become one vector page sized to the drawing; text is paginated (A4/Letter).
+    @discardableResult
+    func writePDF(of tab: Tab, to url: URL) -> Bool {
+        if tab.document.mode == .board {
+            guard let data = BoardRenderer.pdf(tab.document.board) else {
+                presentMessage(L("The whiteboard is empty."), detail: "")
+                return false
+            }
+            do {
+                try SafeWriter.write(data, to: url)
+                return true
+            } catch {
+                presentMessage(L("“%@” couldn't be saved.", url.lastPathComponent), detail: error.localizedDescription)
+                return false
+            }
+        }
+        do {
             let info = NSPrintInfo.shared.copy() as! NSPrintInfo
             info.jobDisposition = .save
             info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = url
@@ -1510,7 +1551,9 @@ extension MainWindowController: NSMenuItemValidation {
             operation.showsProgressPanel = false
             if !operation.run() {
                 self.presentMessage(L("“%@” couldn't be saved.", url.lastPathComponent), detail: "")
+                return false
             }
+            return true
         }
     }
 
@@ -1733,7 +1776,9 @@ extension MainWindowController: NSMenuItemValidation {
         switch menuItem.action {
         case #selector(saveDocument(_:)), #selector(saveDocumentAs(_:)), #selector(closeActiveTab(_:)):
             return tab != nil
-        case #selector(printDocument(_:)), #selector(exportPDF(_:)), #selector(showFind(_:)),
+        case #selector(exportPDF(_:)):
+            return tab != nil
+        case #selector(printDocument(_:)), #selector(showFind(_:)),
              #selector(showFindReplace(_:)), #selector(findNextMatch(_:)), #selector(findPreviousMatch(_:)),
              #selector(useSelectionForFind(_:)), #selector(goToLine(_:)):
             return tab != nil && document?.mode != .board

@@ -246,6 +246,16 @@ final class CodeTextView: NSTextView {
             pickColor(for: swatch.range)
             return
         }
+        // ⌘-click jumps to where the word is declared (in this file or another one).
+        if event.modifierFlags.contains(.command), event.clickCount == 1, !event.modifierFlags.contains(.shift),
+           let controller = window?.windowController as? MainWindowController {
+            let index = characterIndexForInsertion(at: point)
+            if let word = MainWindowController.word(in: nsString, at: index) {
+                setSelectedRange(NSRange(location: index, length: 0))
+                controller.goToDefinition(of: word, from: self, at: point)
+                return
+            }
+        }
         // Option-click adds a caret (VS Code); a plain click goes back to one caret.
         if event.modifierFlags.contains(.option), event.clickCount == 1, !event.modifierFlags.contains(.shift) {
             let index = characterIndexForInsertion(at: point)
@@ -253,6 +263,30 @@ final class CodeTextView: NSTextView {
             return
         }
         super.mouseDown(with: event)
+    }
+
+    /// ⌥⎋ / Edit ▸ Complete: declarations from the whole folder plus words of this file.
+    override func completions(forPartialWordRange charRange: NSRange, indexOfSelectedItem index: UnsafeMutablePointer<Int>) -> [String]? {
+        let text = nsString
+        guard charRange.length > 0, NSMaxRange(charRange) <= text.length else { return nil }
+        let prefix = text.substring(with: charRange)
+        var result: [String] = []
+        var seen = Set<String>()
+        func add(_ word: String) {
+            if word != prefix, seen.insert(word).inserted { result.append(word) }
+        }
+        if let controller = window?.windowController as? MainWindowController {
+            controller.symbols.names(withPrefix: prefix, limit: 30).forEach(add)
+        }
+        let pattern = "\\b" + NSRegularExpression.escapedPattern(for: prefix) + "[\\w$]+"
+        if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
+            for match in regex.matches(in: text as String, range: NSRange(location: 0, length: min(text.length, 2_000_000))).prefix(2000) {
+                add(text.substring(with: match.range))
+                if result.count >= 60 { break }
+            }
+        }
+        index.pointee = result.isEmpty ? -1 : 0
+        return result
     }
 
     /// Cmd+D: select the word, then add its next occurrence as another selection.

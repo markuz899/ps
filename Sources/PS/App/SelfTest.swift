@@ -78,9 +78,9 @@ enum SelfTest {
         try? NSBitmapImageRep(cgImage: composed).representation(using: .png, properties: [:])?.write(to: shots.appendingPathComponent(name + ".png"))
     }
 
-    private static func mouse(_ type: NSEvent.EventType, _ view: NSView, _ point: CGPoint, clicks: Int = 1) -> NSEvent {
+    private static func mouse(_ type: NSEvent.EventType, _ view: NSView, _ point: CGPoint, clicks: Int = 1, modifiers: NSEvent.ModifierFlags = []) -> NSEvent {
         NSEvent.mouseEvent(
-            with: type, location: view.convert(point, to: nil), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            with: type, location: view.convert(point, to: nil), modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime,
             windowNumber: view.window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: clicks, pressure: 1
         )!
     }
@@ -96,9 +96,9 @@ enum SelfTest {
         view.mouseUp(with: mouse(.leftMouseUp, view, end))
     }
 
-    private static func click(_ view: NSView, at point: CGPoint, clicks: Int = 1) {
-        view.mouseDown(with: mouse(.leftMouseDown, view, point, clicks: clicks))
-        view.mouseUp(with: mouse(.leftMouseUp, view, point, clicks: clicks))
+    private static func click(_ view: NSView, at point: CGPoint, clicks: Int = 1, modifiers: NSEvent.ModifierFlags = []) {
+        view.mouseDown(with: mouse(.leftMouseDown, view, point, clicks: clicks, modifiers: modifiers))
+        view.mouseUp(with: mouse(.leftMouseUp, view, point, clicks: clicks, modifiers: modifiers))
     }
 
     /// A small architecture diagram, for the README screenshot.
@@ -860,6 +860,130 @@ enum SelfTest {
         step("git detail closed") {
             let width = controller.window?.frame.width ?? 0
             check(abs(width - gitWindowWidth) < 1, "closing the commit details doesn't resize the window (\(Int(gitWindowWidth)) → \(Int(width)) pt)")
+        }
+
+        // Source Control, ⌘-click to a definition in another file, completion, gutter.
+        let service = workspace.appendingPathComponent("src/service.ts")
+        let callerFile = workspace.appendingPathComponent("src/controller.ts")
+        let readme = workspace.appendingPathComponent("README.md")
+        step("scm prepare") {
+            try? "export class UserService {\n  token = ''\n}\n\nexport function loadUsers(team: string) {\n  return fetch('/users?team=' + team)\n}\n".write(to: service, atomically: true, encoding: .utf8)
+            try? "import { loadUsers } from './service'\n\nexport async function show() {\n  const users = await loadUsers('core')\n  return users\n}\n".write(to: callerFile, atomically: true, encoding: .utf8)
+            if let text = try? String(contentsOf: readme, encoding: .utf8) {
+                try? (text + "\nA line added by the self-test.\n").write(to: readme, atomically: true, encoding: .utf8)
+            }
+            controller.showSourceControl(nil)
+        }
+        step("scm wait") {}
+        step("scm wait 2") {}
+        step("scm listed") {
+            let entries = controller.sidebar.changes.entries
+            check(entries.contains { $0.path == "README.md" && $0.hasUnstagedChanges && !$0.hasStagedChanges }, "Source Control lists a modified file (\(entries.map(\.path)))")
+            check(entries.contains { $0.path == "src/controller.ts" && $0.isUntracked }, "and new, untracked files")
+            screenshot("24-source-control")
+            controller.open(callerFile)
+        }
+        step("definition click") {
+            guard let editor = controller.activeTab?.editor as? CodeEditor, let layout = editor.codeView.layoutManager, let container = editor.codeView.textContainer else { return }
+            check(controller.symbols.definitions(of: "loadUsers").contains { $0.url.lastPathComponent == "service.ts" }, "the symbol index picks up files created while the folder is open")
+            let text = editor.codeView.string as NSString
+            let call = text.range(of: "loadUsers('core')")
+            let partial = NSRange(location: call.location, length: 5)
+            let completions = editor.codeView.completions(forPartialWordRange: partial, indexOfSelectedItem: UnsafeMutablePointer<Int>.allocate(capacity: 1)) ?? []
+            check(completions.contains("loadUsers"), "completion offers names declared in other files (\(completions.prefix(5)))")
+            let glyphs = layout.glyphRange(forCharacterRange: NSRange(location: call.location + 2, length: 1), actualCharacterRange: nil)
+            var rect = layout.boundingRect(forGlyphRange: glyphs, in: container)
+            rect.origin.x += editor.codeView.textContainerOrigin.x
+            rect.origin.y += editor.codeView.textContainerOrigin.y
+            click(editor.codeView, at: CGPoint(x: rect.midX, y: rect.midY), modifiers: .command)
+        }
+        step("definition wait") {}
+        step("definition opened") {
+            let tab = controller.activeTab
+            check(tab?.document.url?.lastPathComponent == "service.ts", "⌘-click on a call opens the file that declares it (\(tab?.document.displayName ?? "-"))")
+            if let tab, let view = tab.editor?.textView {
+                let line = (view.string as NSString).substring(with: view.selectedRange())
+                check(line.contains("function loadUsers"), "with the declaration selected (\(line))")
+            }
+            controller.open(readme)
+        }
+        step("gutter wait") {}
+        step("gutter") {
+            let changes = (controller.activeTab?.editor as? CodeEditor)?.gitChanges
+            check(changes.map { !$0.added.isEmpty } == true, "the gutter marks lines changed since the last commit (\(changes.map { Array($0.added) } ?? []))")
+            screenshot("25-gutter")
+            controller.sidebar.changes.stage(["README.md"])
+        }
+        step("stage wait") {}
+        step("staged") {
+            let entry = controller.sidebar.changes.entries.first { $0.path == "README.md" }
+            check(entry?.hasStagedChanges == true && entry?.hasUnstagedChanges == false, "+ stages a file")
+            controller.sidebar.changes.messageField.stringValue = "Self-test commit"
+            controller.sidebar.changes.commitPressed()
+        }
+        step("commit wait") {}
+        step("commit wait 2") {}
+        step("committed") {
+            let entries = controller.sidebar.changes.entries
+            let subject = (try? GitClient.run(["log", "-1", "--format=%s"], in: workspace))?.trimmingCharacters(in: .whitespacesAndNewlines)
+            check(subject == "Self-test commit" && !entries.contains { $0.path == "README.md" }, "Commit commits only what's staged (\(subject ?? "-"))")
+            check(entries.contains { $0.path == "src/controller.ts" }, "unstaged files stay in the list")
+            check(controller.sidebar.changes.messageField.stringValue.isEmpty, "and the message is cleared")
+            let changes = (controller.activeTab?.editor as? CodeEditor)?.gitChanges
+            check(changes.map { $0.added.isEmpty && $0.modified.isEmpty } == true, "the gutter clears after the commit")
+            controller.closeActiveTab(nil)
+            controller.closeActiveTab(nil)
+            controller.closeActiveTab(nil)
+            controller.sidebar.showExplorer()
+        }
+
+        // PDF of a whiteboard (vector, one page) and of a formatted document (paginated).
+        step("pdf") {
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ps-selftest-pdf-\(ProcessInfo.processInfo.processIdentifier)")
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            controller.open(workspace.appendingPathComponent("docs/flow.excalidraw")) { tab in
+                guard let tab else { check(false, "the demo board opens"); return }
+                let url = folder.appendingPathComponent("board.pdf")
+                let written = controller.writePDF(of: tab, to: url)
+                let pdf = CGPDFDocument(url as CFURL)
+                let box = pdf?.page(at: 1)?.getBoxRect(.mediaBox) ?? .zero
+                check(written && pdf?.numberOfPages == 1 && box.width > 100, "a whiteboard exports as a one-page PDF sized to the drawing (\(Int(box.width))×\(Int(box.height)))")
+                let hasText = (try? Data(contentsOf: url)).map { $0.count < 5_000_000 } ?? false
+                check(hasText, "as vectors, not a huge bitmap")
+                controller.closeActiveTab(nil)
+            }
+            controller.open(workspace.appendingPathComponent("docs/notes.rtf")) { tab in
+                guard let tab else { return }
+                let url = folder.appendingPathComponent("notes.pdf")
+                let written = controller.writePDF(of: tab, to: url)
+                check(written && (CGPDFDocument(url as CFURL)?.numberOfPages ?? 0) >= 1, "a formatted document exports as a paginated PDF")
+            }
+        }
+
+        // Shortcuts can be changed from Settings, clashes are refused.
+        step("custom shortcut") {
+            func menuItem(_ id: String) -> NSMenuItem? {
+                var found: NSMenuItem?
+                func walk(_ menu: NSMenu) { for item in menu.items { if let sub = item.submenu { walk(sub) }; if item.identifier?.rawValue == id { found = item } } }
+                NSApp.mainMenu.map(walk)
+                return found
+            }
+            Prefs.setShortcut(id: "closePane:", key: "w", modifiers: [.command, .control])
+            AppDelegate.applyShortcut(id: "closePane:")
+            let item = menuItem("closePane:")
+            check(item?.keyEquivalent == "w" && item?.keyEquivalentModifierMask == [.command, .control], "a changed shortcut takes effect in the menu right away")
+            check(ShortcutCatalog.groups().flatMap(\.entries).contains { $0.menuID == "closePane:" && $0.isCustomized && $0.keys == "⌃⌘W" }, "and the list shows it as customized")
+            check(ShortcutCatalog.owner(of: "w", modifiers: .command, except: "closePane:") == L("Close Tab"), "a combination that's taken is reported with its owner")
+            Prefs.resetShortcut(id: "closePane:")
+            AppDelegate.applyShortcut(id: "closePane:")
+            check(menuItem("closePane:")?.keyEquivalent == "", "reset brings the default back")
+            (NSApp.delegate as? AppDelegate)?.showShortcuts(nil)
+        }
+        step("shortcuts window") {
+            let settings = (NSApp.delegate as? AppDelegate)?.settingsWindow
+            check(settings?.isVisible == true && settings?.title == L("Keyboard Shortcuts"), "Keyboard Shortcuts… opens Settings on that section (\(settings?.title ?? "-"))")
+            settings?.close()
+            controller.window?.makeKeyAndOrderFront(nil)
         }
 
         // No two menu items share a key combination.

@@ -371,19 +371,22 @@ final class SidebarController: NSViewController {
     let tree = FileTreeController()
     let search = FolderSearchController()
     let graph = GitGraphController()
+    let changes = SourceControlController()
     var onClose: (() -> Void)?
     private let switcher = NSSegmentedControl()
     private let closeButton = NSButton()
     private let container = NSView()
 
     override func loadView() {
-        switcher.segmentCount = 3
+        switcher.segmentCount = 4
         switcher.setImage(NSImage(systemSymbolName: "folder", accessibilityDescription: L("Explorer")), forSegment: 0)
         switcher.setImage(NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: L("Search")), forSegment: 1)
-        switcher.setImage(NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: L("Git Graph")), forSegment: 2)
+        switcher.setImage(NSImage(systemSymbolName: "plusminus.circle", accessibilityDescription: L("Source Control")), forSegment: 2)
+        switcher.setImage(NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: L("Git Graph")), forSegment: 3)
         switcher.setToolTip(L("Explorer") + " (⇧⌘E)", forSegment: 0)
         switcher.setToolTip(L("Search") + " (⇧⌘F)", forSegment: 1)
-        switcher.setToolTip(L("Git Graph"), forSegment: 2)
+        switcher.setToolTip(L("Source Control") + " (⌃⇧G)", forSegment: 2)
+        switcher.setToolTip(L("Git Graph") + " (⌃⇧⌘G)", forSegment: 3)
         switcher.selectedSegment = 0
         switcher.segmentStyle = .automatic
         switcher.target = self
@@ -421,6 +424,7 @@ final class SidebarController: NSViewController {
         addChild(tree)
         addChild(search)
         addChild(graph)
+        addChild(changes)
         show(tree)
     }
 
@@ -444,7 +448,8 @@ final class SidebarController: NSViewController {
     @objc private func switched() {
         switch switcher.selectedSegment {
         case 1: showSearch()
-        case 2: showGraph()
+        case 2: showChanges()
+        case 3: showGraph()
         default: showExplorer()
         }
     }
@@ -460,8 +465,14 @@ final class SidebarController: NSViewController {
         search.focus()
     }
 
-    func showGraph() {
+    func showChanges() {
         switcher.selectedSegment = 2
+        show(changes)
+        changes.refresh()
+    }
+
+    func showGraph() {
+        switcher.selectedSegment = 3
         show(graph)
     }
 }
