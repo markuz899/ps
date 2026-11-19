@@ -1,7 +1,7 @@
 import AppKit
 import PSCore
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemValidation {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemValidation, NSWindowDelegate {
     private(set) var controllers: [MainWindowController] = []
 
     /// The window commands go to: the frontmost editor window.
@@ -133,6 +133,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
+    private var shortcutsWindow: NSWindow?
+
+    @objc func showShortcuts(_ sender: Any?) {
+        if let shortcutsWindow {
+            shortcutsWindow.makeKeyAndOrderFront(nil)
+            return
+        }
+        let controller = ShortcutsController()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 220),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = L("Shortcuts")
+        window.contentViewController = controller
+        window.center()
+        window.delegate = self
+        controller.window = window
+        shortcutsWindow = window
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        if notification.object as? NSWindow === shortcutsWindow { shortcutsWindow = nil }
+    }
+
+    /// Rebuilds the menu bar so customized shortcuts take effect.
+    func rebuildMenu() {
+        NSApp.mainMenu = buildMainMenu()
+    }
+
     @objc func showAbout(_ sender: Any?) {
         let credits = NSAttributedString(
             string: L("Prose & Source — one fast editor for code and documents."),
@@ -173,7 +205,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
     // MARK: Menus
 
-    private func item(_ title: String, _ action: Selector?, _ key: String = "", _ modifiers: NSEvent.ModifierFlags = .command, tag: Int = 0) -> NSMenuItem {
+    private func item(_ title: String, _ action: Selector?, _ key: String = "", _ modifiers: NSEvent.ModifierFlags = .command, tag: Int = 0, shortcutID: String? = nil) -> NSMenuItem {
+        var key = key
+        var modifiers = modifiers
+        if let shortcutID {
+            let stored = Prefs.shortcut(id: shortcutID, defaultKey: key, defaultModifiers: modifiers)
+            key = stored.key
+            modifiers = stored.modifiers
+        }
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
         item.keyEquivalentModifierMask = modifiers
         item.tag = tag
@@ -211,6 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             item(L("About PS"), #selector(showAbout(_:))),
             .separator(),
             item(L("Settings…"), #selector(showSettings(_:)), ","),
+            item(L("Shortcuts…"), #selector(showShortcuts(_:))),
             .separator(),
             servicesItem,
             .separator(),
@@ -339,9 +379,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         let fontManager = NSFontManager.shared
         fontManager.target = nil
         main.addItem(menu(L("View"), [
-            item(L("Toggle Sidebar"), #selector(NSSplitViewController.toggleSidebar(_:)), "s", [.command, .control]),
-            item(L("Explorer"), #selector(W.showExplorer(_:)), "e", [.command, .shift]),
-            item(L("Search"), #selector(W.showFolderSearch(_:)), "f", [.command, .shift, .control]),
+            item(L("Toggle Sidebar"), #selector(NSSplitViewController.toggleSidebar(_:)), "s", [.command, .control], shortcutID: "sidebar"),
+            item(L("Explorer"), #selector(W.showExplorer(_:)), "e", [.command, .shift], shortcutID: "explorer"),
+            item(L("Search"), #selector(W.showFolderSearch(_:)), "f", [.command, .shift, .control], shortcutID: "search"),
+            item(L("Git Graph"), #selector(W.showGitGraph(_:)), "g", [.command, .shift, .control], shortcutID: "gitGraph"),
             item(L("Show Hidden Files"), #selector(W.toggleHiddenFiles(_:)), ".", [.command, .shift]),
             .separator(),
             item(L("Split Editor"), #selector(W.splitEditor(_:)), "\\"),
