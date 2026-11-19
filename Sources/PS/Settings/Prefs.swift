@@ -32,6 +32,17 @@ enum Prefs {
         static let autoSave = "autoSave"
         static let autoSaveInterval = "autoSaveInterval"
         static let showHidden = "showHidden"
+        static let appearance = "appearance"
+        static let restoreSession = "restoreSession"
+        static let lineHeight = "lineHeight"
+        static let highlightCurrentLine = "highlightCurrentLine"
+        static let autoCloseBrackets = "autoCloseBrackets"
+        static let highlightOccurrences = "highlightOccurrences"
+        static let colorSwatches = "colorSwatches"
+        static let spellCheck = "spellCheck"
+        static let boardGrid = "boardGrid"
+        static let boardRoughness = "boardRoughness"
+        static let boardFont = "boardFont"
     }
 
     static let defaults = UserDefaults.standard
@@ -51,6 +62,17 @@ enum Prefs {
             Key.autoSave: AutoSaveMode.off.rawValue,
             Key.autoSaveInterval: 30,
             Key.showHidden: false,
+            Key.appearance: "system",
+            Key.restoreSession: true,
+            Key.lineHeight: 1.12,
+            Key.highlightCurrentLine: true,
+            Key.autoCloseBrackets: true,
+            Key.highlightOccurrences: true,
+            Key.colorSwatches: true,
+            Key.spellCheck: true,
+            Key.boardGrid: true,
+            Key.boardRoughness: 1.0,
+            Key.boardFont: 1,
         ])
     }
 
@@ -66,6 +88,26 @@ enum Prefs {
     static var wordWrap: Bool { defaults.bool(forKey: Key.wordWrap) }
     static var lineNumbers: Bool { defaults.bool(forKey: Key.lineNumbers) }
     static var showHidden: Bool { defaults.bool(forKey: Key.showHidden) }
+    static var restoreSession: Bool { defaults.bool(forKey: Key.restoreSession) }
+    static var lineHeight: CGFloat { CGFloat(min(2, max(1, defaults.double(forKey: Key.lineHeight)))) }
+    static var highlightCurrentLine: Bool { defaults.bool(forKey: Key.highlightCurrentLine) }
+    static var autoCloseBrackets: Bool { defaults.bool(forKey: Key.autoCloseBrackets) }
+    static var highlightOccurrences: Bool { defaults.bool(forKey: Key.highlightOccurrences) }
+    static var colorSwatches: Bool { defaults.bool(forKey: Key.colorSwatches) }
+    static var spellCheck: Bool { defaults.bool(forKey: Key.spellCheck) }
+    static var boardGrid: Bool { defaults.bool(forKey: Key.boardGrid) }
+    static var boardRoughness: Double { defaults.double(forKey: Key.boardRoughness) }
+    static var boardFont: Int { max(1, defaults.integer(forKey: Key.boardFont)) }
+
+    /// "system", "light" or "dark": the app's appearance, independent of macOS if chosen.
+    static func applyAppearance() {
+        switch defaults.string(forKey: Key.appearance) {
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        default: NSApp.appearance = nil
+        }
+    }
+
     static var autoSave: AutoSaveMode { AutoSaveMode(rawValue: defaults.string(forKey: Key.autoSave) ?? "") ?? .off }
     static var autoSaveInterval: Int { max(5, defaults.integer(forKey: Key.autoSaveInterval)) }
 
@@ -87,8 +129,11 @@ enum Prefs {
 
     /// Everything that affects editors; used to skip work on unrelated defaults changes.
     static var signature: String {
+        // showHidden must stay last: the window controller reads it from the end.
         [Key.codeFontName, Key.codeFontSize, Key.tabWidth, Key.insertSpaces, Key.wordWrap, Key.lineNumbers,
-         Key.lightTheme, Key.darkTheme, Key.richFontName, Key.richFontSize, Key.showHidden]
+         Key.lightTheme, Key.darkTheme, Key.richFontName, Key.richFontSize, Key.appearance, Key.lineHeight,
+         Key.highlightCurrentLine, Key.highlightOccurrences, Key.colorSwatches, Key.spellCheck, Key.boardGrid,
+         Key.showHidden]
             .map { "\(defaults.object(forKey: $0) ?? "")" }
             .joined(separator: "|")
     }

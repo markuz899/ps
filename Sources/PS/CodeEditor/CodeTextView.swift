@@ -36,19 +36,19 @@ final class CodeTextView: NSTextView {
         guard let layoutManager, let textContainer else { return }
 
         let selection = selectedRange()
-        if selection.length == 0 {
+        if selection.length == 0, Prefs.highlightCurrentLine {
             let line = lineRect(containing: selection.location)
             currentLineColor.setFill()
             NSRect(x: 0, y: line.minY, width: bounds.width, height: line.height).fill()
         }
 
         let visible = visibleCharacters()
-        drawOccurrences(in: visible)
+        if Prefs.highlightOccurrences { drawOccurrences(in: visible) }
         for range in extraCursors where range.length > 0 && NSMaxRange(range) <= nsString.length {
             (selectedTextAttributes[.backgroundColor] as? NSColor ?? .selectedTextBackgroundColor).setFill()
             rects(for: range).forEach { $0.fill() }
         }
-        drawSwatches(in: visible)
+        if Prefs.colorSwatches { drawSwatches(in: visible) } else { swatches = [] }
 
         for range in bracketRanges where NSMaxRange(range) <= nsString.length {
             let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
@@ -440,7 +440,7 @@ final class CodeTextView: NSTextView {
         }
         let selection = selectedRange()
         let next = character(at: NSMaxRange(selection))
-        let pairs = language.pairs
+        let pairs = Prefs.autoCloseBrackets ? language.pairs : []
 
         // Typing a closer that's already there just steps over it.
         if selection.length == 0, next == key, pairs.contains(where: { $0.close == key }) {

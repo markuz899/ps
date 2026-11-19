@@ -148,7 +148,7 @@ final class CodeEditor: NSObject, DocumentEditor, NSTextViewDelegate {
         let spaceWidth = (" " as NSString).size(withAttributes: [.font: font]).width
         style.tabStops = []
         style.defaultTabInterval = spaceWidth * CGFloat(document.useTabs ? Prefs.tabWidth : document.indentWidth)
-        style.lineHeightMultiple = 1.12
+        style.lineHeightMultiple = Prefs.lineHeight
 
         let storage = document.textStorage
         storage.beginEditing()

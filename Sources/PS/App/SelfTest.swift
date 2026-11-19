@@ -6,6 +6,7 @@ import PSCore
 /// `--selftest-restore <workspace>` is the second half, run after a relaunch.
 enum SelfTest {
     private static var steps: [(String, () -> Void)] = []
+    private static var savedAppearance = "system"
     private static var failures = 0
     private static var controller: MainWindowController!
     private static var shots: URL!
@@ -210,7 +211,10 @@ enum SelfTest {
     static func run(_ controller: MainWindowController) {
         self.controller = controller
         // Screenshots in light mode regardless of the system setting.
-        if CommandLine.arguments.contains("--light") { NSApp.appearance = NSAppearance(named: .aqua) }
+        if CommandLine.arguments.contains("--light") {
+            Prefs.defaults.set("light", forKey: Prefs.Key.appearance)
+            Prefs.applyAppearance()
+        }
         let arguments = CommandLine.arguments
         if let index = arguments.firstIndex(of: "--selftest-restore") {
             workspace = URL(fileURLWithPath: arguments[index + 1])
@@ -233,14 +237,16 @@ enum SelfTest {
             (NSApp.delegate as? AppDelegate)?.showSettings(nil)
         }
         step("settings check") {
-            let window = NSApp.windows.first { $0.title == L("Settings") }
+            let window = (NSApp.delegate as? AppDelegate)?.settingsWindow
             check(window?.isVisible == true, "Settings opens (no crash)")
             if let window {
                 check(abs(window.frame.width - SettingsHost.size.width) < 40, "the Settings window keeps a stable size (\(Int(window.frame.width)) pt)")
-                if let image = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(window.windowNumber), [.boundsIgnoreFraming]) {
-                    try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: shots.appendingPathComponent("00-settings.png"))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    if let image = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(window.windowNumber), [.boundsIgnoreFraming]) {
+                        try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: shots.appendingPathComponent("00-settings.png"))
+                    }
+                    window.close()
                 }
-                window.close()
             }
         }
         step("welcome") {
@@ -276,11 +282,43 @@ enum SelfTest {
         step("sidebar hidden") {
             check(controller.isSidebarCollapsed, "the button in the sidebar closes it")
             screenshot("02b-sidebar-hidden")
-            NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
+            controller.toggleSidebar(nil)
         }
         step("sidebar back") {
             check(!controller.isSidebarCollapsed, "the title-bar toggle (⌃⌘S) brings it back")
             check(Int(controller.window?.frame.width ?? 0) == 1180, "hiding and showing the sidebar doesn't resize the window")
+        }
+        // Sublime Text-style "+" after the tabs, and double-click on the empty bar.
+        step("plus button") {
+            let pane = controller.activePane!
+            let before = pane.tabs.count
+            pane.tabBar.addButton.performClick(nil)
+            check(pane.tabs.count == before + 1 && controller.activeTab?.document.url == nil && controller.activeTab?.document.mode == .code, "the + after the tabs opens a new file in that pane")
+            check(pane.tabBar.addButton.menu?.items.count == 3, "its menu offers file, text document and whiteboard")
+            pane.tabBar.mouseDown(with: mouse(.leftMouseDown, pane.tabBar, CGPoint(x: pane.tabBar.bounds.maxX - 10, y: 18), clicks: 2))
+            check(pane.tabs.count == before + 2, "double-clicking the empty tab bar opens a new file too")
+            screenshot("02c-plus-button")
+        }
+        step("close new tabs") {
+            for tab in controller.tabs where tab.document.url == nil && !tab.document.hasContent { controller.closeTab(tab) }
+        }
+        step("settings effects") {
+            Prefs.defaults.set(false, forKey: Prefs.Key.autoCloseBrackets)
+            if let tab = tab(named: "main.swift"), let view = tab.editor?.textView {
+                controller.activate(tab)
+                view.setSelectedRange(NSRange(location: 0, length: 0))
+                view.insertText("(", replacementRange: NSRange(location: NSNotFound, length: 0))
+                check((view.string as NSString).substring(to: 2) == "(i", "with auto-close off, typing ( adds no )")
+                tab.document.undoManager.undo()
+            }
+            Prefs.defaults.set(true, forKey: Prefs.Key.autoCloseBrackets)
+            savedAppearance = Prefs.defaults.string(forKey: Prefs.Key.appearance) ?? "system"
+            Prefs.defaults.set(savedAppearance == "dark" ? "light" : "dark", forKey: Prefs.Key.appearance)
+        }
+        step("appearance setting") {
+            let expected: NSAppearance.Name = savedAppearance == "dark" ? .aqua : .darkAqua
+            check(NSApp.appearance?.name == expected, "the Appearance setting switches the whole app")
+            Prefs.defaults.set(savedAppearance, forKey: Prefs.Key.appearance)
         }
         step("tree expanded") {
             controller.sidebar.tree.select(src.appendingPathComponent("main.swift"))
@@ -496,6 +534,7 @@ enum SelfTest {
         }
         step("three panes") {
             check(controller.panes.count == 3, "a third pane via Split Right")
+            check(!controller.panes.contains { $0.tabBar.hasClippedTabs }, "in narrow panes tabs shrink instead of being cut at the edge")
             check(Int(controller.window?.frame.width ?? 0) == 1180, "three panes fit in the same window (\(Int(controller.window?.frame.width ?? 0)) pt)")
             let widths = controller.panes.map { Int($0.view.frame.width) }
             check((widths.max() ?? 0) - (widths.min() ?? 0) <= 8, "the three panes have equal widths (\(widths))")

@@ -32,7 +32,7 @@ final class RichEditor: NSObject, DocumentEditor, NSTextViewDelegate {
         view.usesRuler = true
         view.isRulerVisible = false
         view.drawsBackground = true
-        view.isContinuousSpellCheckingEnabled = true
+        view.isContinuousSpellCheckingEnabled = Prefs.spellCheck
         view.usesAdaptiveColorMappingForDarkAppearance = true
         view.isHorizontallyResizable = false
         view.autoresizingMask = [.width]
@@ -61,6 +61,7 @@ final class RichEditor: NSObject, DocumentEditor, NSTextViewDelegate {
     }
 
     func applyPreferences() {
+        richView.isContinuousSpellCheckingEnabled = Prefs.spellCheck
         richView.needsDisplay = true
     }
 

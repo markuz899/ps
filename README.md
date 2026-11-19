@@ -12,6 +12,7 @@ ways, no dependencies.
 | ![Split panes](docs/screenshots/panes.png) | ![Markdown preview](docs/screenshots/markdown.png) |
 | ![Command palette](docs/screenshots/palette.png) | ![Whiteboard, dark mode](docs/screenshots/whiteboard-dark.png) |
 | ![Welcome screen](docs/screenshots/welcome.png) | ![Focus mode](docs/screenshots/focus.png) |
+| ![Settings](docs/screenshots/settings.png) | ![New tab button](docs/screenshots/new-tab.png) |
 
 ## Installation
 
@@ -116,6 +117,28 @@ architectures, application flows and diagrams, in the spirit of [Excalidraw](htt
 
 Not supported yet: images on the board, rotation handles (rotated elements from Excalidraw
 are drawn rotated), frames, libraries, live collaboration.
+
+## Tabs
+
+- A **+** after the last tab (like Sublime Text) opens a new file in that pane;
+  right-click it for a text document or a whiteboard. Double-clicking the empty part of the
+  tab bar does the same.
+- When a pane is too narrow for its tabs, they shrink and their titles end in "…"; past a
+  minimum width the bar scrolls, with a fade at the edges instead of a hard cut.
+
+## Settings
+
+PS ▸ Settings (⌘,) is laid out like System Settings: sections in a sidebar, grouped options,
+live previews.
+
+| Section | Options |
+|---|---|
+| General | Appearance (Automatic / Light / Dark, independent of macOS), reopen the session at launch, auto-save (off / on focus change / every N seconds), hidden files |
+| Code Editor | Font, size and line height with a live preview, tab width, spaces vs tabs, line numbers, word wrap, current-line highlight, occurrence highlight, CSS colour swatches, auto-closing brackets |
+| Themes | One theme for light mode and one for dark mode, picked from preview cards; custom JSON themes in `~/Library/Application Support/PS/Themes` |
+| Documents | Default font and size for new text documents (with preview), spell checking |
+| Whiteboard | Dot grid, default sloppiness and font for new elements |
+| About | Version and project link |
 
 ## Closing a folder
 
@@ -254,7 +277,7 @@ single cause.
 ### Acceptance criteria
 
 "Verified" = checked by running the app (`--selftest` + `--selftest-restore`, real windows and
-files, 131 checks, all passed, plus 36 unit tests). "Deduced" = from the code only, not run.
+files, 137 checks, all passed in light and dark mode, plus 36 unit tests). "Deduced" = from the code only, not run.
 
 | Criterion | Outcome |
 |---|---|

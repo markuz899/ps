@@ -49,7 +49,7 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
             onToolChange?()
         }
     }
-    var style = BoardStyle()
+    var style = BoardStyle(roughness: Prefs.boardRoughness, fontFamily: Prefs.boardFont)
     private(set) var selection: Set<String> = [] {
         didSet { if selection != oldValue { onSelectionChange?() } }
     }
@@ -241,7 +241,7 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
     }
 
     private func drawGrid(_ rect: NSRect) {
-        guard zoom >= 0.4 else { return }
+        guard zoom >= 0.4, Prefs.boardGrid else { return }
         let step = 20 * zoom
         (isDark ? NSColor.white.withAlphaComponent(0.07) : NSColor.black.withAlphaComponent(0.07)).setFill()
         var x = offset.x.truncatingRemainder(dividingBy: step)
