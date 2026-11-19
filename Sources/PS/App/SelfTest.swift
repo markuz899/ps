@@ -14,6 +14,7 @@ enum SelfTest {
 
     static var isActive: Bool {
         CommandLine.arguments.contains("--selftest") || CommandLine.arguments.contains("--selftest-restore")
+            || CommandLine.arguments.contains("--selftest-tabs")
     }
 
     private static func check(_ condition: Bool, _ name: String) {
@@ -216,7 +217,10 @@ enum SelfTest {
             Prefs.applyAppearance()
         }
         let arguments = CommandLine.arguments
-        if let index = arguments.firstIndex(of: "--selftest-restore") {
+        if let index = arguments.firstIndex(of: "--selftest-tabs") {
+            shots = URL(fileURLWithPath: arguments[index + 1])
+            tabSteps()
+        } else if let index = arguments.firstIndex(of: "--selftest-restore") {
             workspace = URL(fileURLWithPath: arguments[index + 1])
             restoreSteps()
         } else if let index = arguments.firstIndex(of: "--selftest") {
@@ -859,6 +863,25 @@ enum SelfTest {
             check((state["folder"] as? String) == workspace.standardizedFileURL.path, "session stores the folder")
             let saved = (state["panes"] as? [[String: Any]] ?? []).reduce(0) { $0 + (($1["tabs"] as? [Any])?.count ?? 0) }
             check(saved == controller.tabs.count, "session stores every tab of every pane, the untitled one too")
+        }
+    }
+
+    /// Just the tab bar, as in a bug report: whiteboard with edits + two new files.
+    private static func tabSteps() {
+        step("whiteboard") {
+            controller.newWhiteboard(nil)
+            if let canvas = (controller.activeTab?.editor as? BoardEditor)?.canvas {
+                canvas.tool = .rectangle
+                drag(canvas, from: CGPoint(x: 200, y: 200), to: CGPoint(x: 320, y: 280))
+            }
+        }
+        step("files") {
+            controller.activePane.tabBar.addButton.performClick(nil)
+            controller.activePane.tabBar.addButton.performClick(nil)
+        }
+        step("middle") {
+            if controller.activePane.tabs.count == 3 { controller.activate(controller.activePane.tabs[1]) }
+            screenshot("tabs")
         }
     }
 

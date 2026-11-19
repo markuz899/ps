@@ -53,6 +53,8 @@ final class Pane: NSObject, TabBarDelegate {
         formatBar.isHidden = true
         breadcrumb.isHidden = true
         container.wantsLayer = true
+        // Whatever the editor draws stays inside the editor area (see LineNumberRuler).
+        if #available(macOS 14, *) { container.clipsToBounds = true }
         container.setContentHuggingPriority(.defaultLow, for: .vertical)
         container.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 

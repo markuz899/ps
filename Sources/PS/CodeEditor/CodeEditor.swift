@@ -231,6 +231,9 @@ final class LineNumberRuler: NSRulerView {
         super.init(scrollView: textView.enclosingScrollView, orientation: .verticalRuler)
         clientView = textView
         ruleThickness = 40
+        // Since macOS 14 views don't clip by default: the ruler's edge was drawn up over
+        // the tab bar as a thin vertical line.
+        if #available(macOS 14, *) { clipsToBounds = true }
         setAccessibilityElement(false)
     }
 
