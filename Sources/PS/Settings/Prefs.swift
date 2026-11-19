@@ -149,6 +149,10 @@ enum Prefs {
         defaults.set("\(key)|\(modifiers.rawValue)", forKey: Key.shortcutPrefix + id)
     }
 
+    static func hasCustomShortcut(_ id: String) -> Bool {
+        defaults.string(forKey: Key.shortcutPrefix + id) != nil
+    }
+
     static func resetShortcut(id: String) {
         defaults.removeObject(forKey: Key.shortcutPrefix + id)
     }

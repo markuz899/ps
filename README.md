@@ -14,6 +14,7 @@ ways, no dependencies.
 | ![Welcome screen](docs/screenshots/welcome.png) | ![Focus mode](docs/screenshots/focus.png) |
 | ![Settings](docs/screenshots/settings.png) | ![New tab button](docs/screenshots/new-tab.png) |
 | ![Whiteboard library and pictures](docs/screenshots/library.png) | ![Minimap](docs/screenshots/minimap.png) |
+| ![Source Control](docs/screenshots/source-control.png) | ![Changed lines in the gutter](docs/screenshots/gutter.png) |
 
 ## Installation
 
@@ -120,10 +121,44 @@ architectures, application flows and diagrams, in the spirit of [Excalidraw](htt
 - **Library**: the Library button (top right) has ready-made pieces for diagrams —
   database, server, user, queue, cloud, browser, phone, document, sticky note. Each is a
   group of ordinary elements: move it as one, ungroup (⇧⌘G) to edit its parts.
-- **Export**: File ▸ Export as PNG… or ⌥⇧⌘C (the selection, or the whole board).
+- **Export**: File ▸ Export as PNG… or ⌥⇧⌘C (the selection, or the whole board), or
+  File ▸ Export as PDF… — one vector page sized to the drawing, sharp at any zoom.
 
 Not supported yet: rotation handles (rotated elements from Excalidraw are drawn rotated),
 frames, live collaboration.
+
+## Git
+
+Two sidebar sections, for a folder inside a git repository:
+
+- **Source Control** (⌃⇧G): the changed files, split into *Staged Changes* and *Changes*
+  (M modified, U untracked, D deleted, R renamed, ! conflict). `+` / `−` on a row, or on a
+  section header, stages and unstages; a click shows the diff in a read-only tab (reused,
+  not piled up); a double-click opens the file. Write the message and press **Commit** or
+  ⌘↩: only what's staged is committed, or everything when nothing is staged (VS Code's
+  "smart commit"). Pull (fast-forward only) and Push use your usual git credentials.
+- **Git Graph** (⌃⇧⌘G): the history with branches and tags, filters, commit details and the
+  diff of each file.
+- **Gutter**: in code files, a green bar marks added lines, a blue one modified lines and
+  a red wedge deleted lines, against the last commit. It updates on save and after commits.
+
+Not yet: staging single hunks, discarding changes, branches from the Source Control panel.
+
+## Go to definition and completion
+
+**⌘-click** on a name (or **F12** with the caret on it) opens the file where it's declared
+and selects the declaration — for example a function called from a controller and defined
+in a service in another folder. With several candidates a menu lets you pick; the current
+file comes first, then files in the same language.
+
+**⌥⎋** (Edit ▸ Complete) suggests the names declared anywhere in the folder plus the words of
+the current file.
+
+Both use an index of the folder's declarations built in the background when a folder is
+opened, kept up to date as files change. It's the same regex outline used by the breadcrumb
+(functions, methods, classes, types… for Swift, JS/TS, Python, Go, Rust, C/C++, Java, PHP,
+Ruby, shell, SQL): it finds *where a name is declared*, not which overload or type a call
+resolves to. A language-server client would be the step up.
 
 ## Minimap
 
@@ -151,7 +186,7 @@ live previews.
 | Themes | One theme for light mode and one for dark mode, picked from preview cards; custom JSON themes in `~/Library/Application Support/PS/Themes` |
 | Documents | Default font and size for new text documents (with preview), spell checking |
 | Whiteboard | Dot grid, default sloppiness and font for new elements |
-| Keyboard Shortcuts | Every shortcut, searchable: read from the menus (always current) plus the ones outside them — whiteboard tools, mouse gestures, tabs |
+| Keyboard Shortcuts | Every shortcut, searchable, and **editable**: click one and press the new keys (⌫ removes it, ⎋ cancels). A combination already in use is refused, naming the command that has it; customized ones can be reset one by one or all together. Also from PS ▸ Keyboard Shortcuts… |
 | About | Version and project link |
 
 ## Closing a folder
@@ -198,6 +233,10 @@ Sources/PSCore/            non-visual logic, fully tested
   LineIndex.swift          incremental line index (offset → line in O(log n))
   Symbols.swift            outline per language (breadcrumb), regex-based
   CodeAssist.swift         colour literals, multi-cursor arithmetic, Markdown renderer
+  SymbolIndex.swift        declarations of the whole folder by name (go to definition, completion)
+  Git.swift                git runner and parsers (log, refs, diff-tree); GitGraphLayout.swift lanes
+  GitChanges.swift         git status, stage/unstage/commit/pull/push, changed lines for the gutter
+  Board.swift              whiteboard model + Excalidraw codec; BoardLibrary.swift shapes
 Sources/PS/
   App/                     lifecycle, menus, main window, status bar, welcome screen, session, icon, bench, self-test
   Workspace/               file tree (NSOutlineView, lazy loading), FSEvents
@@ -207,6 +246,8 @@ Sources/PS/
   Highlighting/            incremental highlighter (temporary attributes)
   RichEditor/              word-processor view, formatting bar, lists, links
   Search/                  find bar, folder search, Quick Open
+  Git/                     Git Graph, commit details, Source Control panel
+  Board/                   whiteboard canvas, renderer, inspector
   Settings/                UserDefaults preferences + SwiftUI Settings window
 ```
 
@@ -252,6 +293,8 @@ To add a theme: one JSON file in `Themes/` (or in the user folder).
 | Multiple cursors: next occurrence · caret above/below · add caret | ⌘D · ⌥⌘↑ / ⌥⌘↓ · ⌥click |
 | Copy code as image | ⌥⇧⌘C |
 | Go to line · Change language | ⌃G · ⇧⌘L |
+| Go to definition · Complete | ⌘click or F12 · ⌥⎋ |
+| Source Control · Git Graph | ⌃⇧G · ⌃⇧⌘G |
 | Toggle comment · Indent / Outdent | ⌘/ · ⌘] / ⌘[ (also Tab / ⇧Tab on a selection) |
 | Duplicate line · Move line up/down · Delete line | ⇧⌥↓ · ⌥↑ / ⌥↓ · ⇧⌘K |
 | Word wrap · Zoom in / out / actual size | ⌥Z · ⌘+ / ⌘- / ⌘0 |
@@ -263,6 +306,7 @@ To add a theme: one JSON file in `Themes/` (or in the user folder).
 | Print · Settings | ⌥⌘P · ⌘, |
 
 ⌘P goes to Quick Open (VS Code convention, required by the spec); printing is therefore on ⌥⌘P.
+Every menu shortcut can be changed in Settings ▸ Keyboard Shortcuts.
 
 ---
 
@@ -291,7 +335,7 @@ single cause.
 ### Acceptance criteria
 
 "Verified" = checked by running the app (`--selftest` + `--selftest-restore`, real windows and
-files, 148 checks, all passed in light and dark mode, plus 39 unit tests). "Deduced" = from the code only, not run.
+files, 163 checks, all passed in light and dark mode, plus 66 unit tests). "Deduced" = from the code only, not run.
 
 | Criterion | Outcome |
 |---|---|
@@ -357,7 +401,7 @@ dot), Italian interface and light mode.
   bar, but **not tested** with VoiceOver running.
 - **Interactions not automated**: dragging tabs and pane dividers, dragging in the tree,
   inline rename, Finder drag-and-drop, the language popover, ⌥click with the mouse,
-  print/PDF/DOCX export, the "Replace All…" preview sheet (the self-test calls the replace
+  print and DOCX export (PDF export is verified), the "Replace All…" preview sheet (the self-test calls the replace
   directly). They are in the code but were
   not exercised by the self-test.
 - **Highlighting**: no embedded languages (JS/CSS inside HTML, code inside Markdown is shown

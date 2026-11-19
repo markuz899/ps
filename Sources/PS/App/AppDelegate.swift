@@ -1,7 +1,7 @@
 import AppKit
 import PSCore
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemValidation, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemValidation {
     private(set) var controllers: [MainWindowController] = []
 
     /// The window commands go to: the frontmost editor window.
@@ -133,36 +133,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
-    private var shortcutsWindow: NSWindow?
-
+    /// App menu ▸ Keyboard Shortcuts…: the Settings section where they're listed and edited.
     @objc func showShortcuts(_ sender: Any?) {
-        if let shortcutsWindow {
-            shortcutsWindow.makeKeyAndOrderFront(nil)
-            return
-        }
-        let controller = ShortcutsController()
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 220),
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = L("Shortcuts")
-        window.contentViewController = controller
-        window.center()
-        window.delegate = self
-        controller.window = window
-        shortcutsWindow = window
-        window.makeKeyAndOrderFront(nil)
-    }
-
-    func windowWillClose(_ notification: Notification) {
-        if notification.object as? NSWindow === shortcutsWindow { shortcutsWindow = nil }
-    }
-
-    /// Rebuilds the menu bar so customized shortcuts take effect.
-    func rebuildMenu() {
-        NSApp.mainMenu = buildMainMenu()
+        SettingsView.initialSection = .shortcuts
+        showSettings(sender)
+        SettingsView.initialSection = .general
+        NotificationCenter.default.post(name: .psShowSettingsSection, object: "shortcuts")
     }
 
     @objc func showAbout(_ sender: Any?) {
@@ -205,18 +181,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
     // MARK: Menus
 
-    private func item(_ title: String, _ action: Selector?, _ key: String = "", _ modifiers: NSEvent.ModifierFlags = .command, tag: Int = 0, shortcutID: String? = nil) -> NSMenuItem {
-        var key = key
-        var modifiers = modifiers
-        if let shortcutID {
-            let stored = Prefs.shortcut(id: shortcutID, defaultKey: key, defaultModifiers: modifiers)
-            key = stored.key
-            modifiers = stored.modifiers
-        }
+    /// Default shortcut of every menu command, by stable id (see `item`).
+    static private(set) var defaultShortcuts: [String: (key: String, modifiers: NSEvent.ModifierFlags)] = [:]
+    private var usedIDs: [String: Int] = [:]
+
+    /// Every command gets an id independent of the language: its action, tag, and an
+    /// occurrence number when the same action appears twice. Customized keys apply here.
+    private func item(_ title: String, _ action: Selector?, _ key: String = "", _ modifiers: NSEvent.ModifierFlags = .command, tag: Int = 0) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
         item.keyEquivalentModifierMask = modifiers
         item.tag = tag
+        if let action {
+            var id = NSStringFromSelector(action) + (tag == 0 ? "" : "#\(tag)")
+            let seen = usedIDs[id, default: 0]
+            usedIDs[id] = seen + 1
+            if seen > 0 { id += "@\(seen + 1)" }
+            item.identifier = NSUserInterfaceItemIdentifier(id)
+            AppDelegate.defaultShortcuts[id] = (key, modifiers)
+            let stored = Prefs.shortcut(id: id, defaultKey: key, defaultModifiers: modifiers)
+            item.keyEquivalent = stored.key
+            item.keyEquivalentModifierMask = stored.modifiers
+        }
         return item
+    }
+
+    /// Applies a changed shortcut to the live menu (and every other copy of the id).
+    static func applyShortcut(id: String) {
+        guard let fallback = defaultShortcuts[id] else { return }
+        let stored = Prefs.shortcut(id: id, defaultKey: fallback.key, defaultModifiers: fallback.modifiers)
+        func walk(_ menu: NSMenu) {
+            for item in menu.items {
+                if let submenu = item.submenu { walk(submenu) }
+                if item.identifier?.rawValue == id {
+                    item.keyEquivalent = stored.key
+                    item.keyEquivalentModifierMask = stored.modifiers
+                }
+            }
+        }
+        NSApp.mainMenu.map(walk)
     }
 
     private func menu(_ title: String, _ items: [NSMenuItem]) -> NSMenuItem {
@@ -236,6 +238,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     }
 
     private func buildMainMenu() -> NSMenu {
+        usedIDs = [:]
         typealias W = MainWindowController
         let main = NSMenu()
         let undo = Selector(("undo:"))
@@ -250,7 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             item(L("About PS"), #selector(showAbout(_:))),
             .separator(),
             item(L("Settings…"), #selector(showSettings(_:)), ","),
-            item(L("Shortcuts…"), #selector(showShortcuts(_:))),
+            item(L("Keyboard Shortcuts…"), #selector(showShortcuts(_:))),
             .separator(),
             servicesItem,
             .separator(),
@@ -368,6 +371,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             .separator(),
             item(L("Change Language Mode…"), #selector(W.showLanguagePicker(_:)), "l", [.command, .shift]),
             item(L("Go to Line…"), #selector(W.goToLine(_:)), "g", [.control]),
+            item(L("Go to Definition"), #selector(W.goToDefinitionAtCaret(_:)), String(UnicodeScalar(NSF12FunctionKey)!), []),
+            item(L("Complete"), #selector(NSTextView.complete(_:)), "\u{1b}", [.option]),
             .separator(),
             item(L("Copy Code as Image"), #selector(W.copyCodeImage(_:)), "c", [.command, .option, .shift]),
             item(L("Export Code as Image…"), #selector(W.exportCodeImage(_:))),
@@ -379,10 +384,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         let fontManager = NSFontManager.shared
         fontManager.target = nil
         main.addItem(menu(L("View"), [
-            item(L("Toggle Sidebar"), #selector(NSSplitViewController.toggleSidebar(_:)), "s", [.command, .control], shortcutID: "sidebar"),
-            item(L("Explorer"), #selector(W.showExplorer(_:)), "e", [.command, .shift], shortcutID: "explorer"),
-            item(L("Search"), #selector(W.showFolderSearch(_:)), "f", [.command, .shift, .control], shortcutID: "search"),
-            item(L("Git Graph"), #selector(W.showGitGraph(_:)), "g", [.command, .shift, .control], shortcutID: "gitGraph"),
+            item(L("Toggle Sidebar"), #selector(NSSplitViewController.toggleSidebar(_:)), "s", [.command, .control]),
+            item(L("Explorer"), #selector(W.showExplorer(_:)), "e", [.command, .shift]),
+            item(L("Search"), #selector(W.showFolderSearch(_:)), "f", [.command, .shift, .control]),
+            item(L("Source Control"), #selector(W.showSourceControl(_:)), "g", [.control, .shift]),
+            item(L("Git Graph"), #selector(W.showGitGraph(_:)), "g", [.command, .shift, .control]),
             item(L("Show Hidden Files"), #selector(W.toggleHiddenFiles(_:)), ".", [.command, .shift]),
             .separator(),
             item(L("Split Editor"), #selector(W.splitEditor(_:)), "\\"),

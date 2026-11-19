@@ -402,6 +402,30 @@ struct BoardRenderer {
 
     // MARK: Export
 
+    /// Vector PDF of the whole board, one page sized to its content.
+    static func pdf(_ scene: BoardScene, dark: Bool = false, padding: CGFloat = 32) -> Data? {
+        guard let content = BoardGeometry.bounds(of: scene.visible) else { return nil }
+        let frame = content.insetBy(dx: -padding, dy: -padding)
+        let data = NSMutableData()
+        var box = CGRect(origin: .zero, size: frame.size)
+        guard let consumer = CGDataConsumer(data: data as CFMutableData),
+              let cg = CGContext(consumer: consumer, mediaBox: &box, nil) else { return nil }
+        cg.beginPDFPage(nil)
+        cg.translateBy(x: 0, y: frame.height)
+        cg.scaleBy(x: 1, y: -1)
+        cg.translateBy(x: -frame.minX, y: -frame.minY)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: cg, flipped: true)
+        let renderer = BoardRenderer(dark: dark)
+        renderer.background(of: scene).setFill()
+        frame.fill()
+        renderer.draw(scene)
+        NSGraphicsContext.restoreGraphicsState()
+        cg.endPDFPage()
+        cg.closePDF()
+        return data as Data
+    }
+
     /// PNG of the given elements (or the whole scene), 2×, with padding and background.
     static func png(_ scene: BoardScene, only ids: Set<String>? = nil, dark: Bool = false, padding: CGFloat = 32) -> Data? {
         var subset = scene
