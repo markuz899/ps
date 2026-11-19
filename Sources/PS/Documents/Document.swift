@@ -78,7 +78,11 @@ final class Document: NSObject, NSTextStorageDelegate {
         markSaved()
     }
 
+    /// Overrides the tab title (used e.g. for read-only diff tabs).
+    var customDisplayName: String?
+
     var displayName: String {
+        if let customDisplayName { return customDisplayName }
         if let url { return url.lastPathComponent }
         let base: String
         switch mode {
