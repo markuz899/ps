@@ -128,12 +128,13 @@ final class GitCommitDetailController: NSViewController, NSTableViewDataSource, 
         emptyLabel.textColor = .secondaryLabelColor
         emptyLabel.maximumNumberOfLines = 2
         emptyLabel.lineBreakMode = .byWordWrapping
+        emptyLabel.translatesAutoresizingMaskIntoConstraints = false
 
         let content = NSStackView(views: [titleLabel, hashRow, authorLabel, dateLabel, messageLabel, parentsLabel, parentsStack, filesLabel, filesScroll])
         content.orientation = .vertical
         content.alignment = .leading
         content.spacing = 6
-        content.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        content.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 30) // room for the close button
         content.setHuggingPriority(.defaultLow, for: .horizontal)
         for view in content.views where view !== filesScroll {
             view.setContentHuggingPriority(.defaultHigh, for: .horizontal)
@@ -141,6 +142,8 @@ final class GitCommitDetailController: NSViewController, NSTableViewDataSource, 
         }
 
         let scroll = NSScrollView()
+        // Flipped, so a short commit sits at the top of the panel rather than the bottom.
+        scroll.contentView = FlippedClipView()
         scroll.documentView = content
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
@@ -154,9 +157,9 @@ final class GitCommitDetailController: NSViewController, NSTableViewDataSource, 
         ])
 
         let root = NSView()
-        root.addSubview(closeButton)
         root.addSubview(scroll)
         root.addSubview(emptyLabel)
+        root.addSubview(closeButton) // last, so it stays above the scroll view
         NSLayoutConstraint.activate([
             closeButton.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 6),
             closeButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
@@ -281,4 +284,8 @@ final class GitCommitDetailController: NSViewController, NSTableViewDataSource, 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
         20
     }
+}
+
+private final class FlippedClipView: NSClipView {
+    override var isFlipped: Bool { true }
 }

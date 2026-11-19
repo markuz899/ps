@@ -44,6 +44,13 @@ public struct GitGraphRow: Equatable {
     public var verticals: [(lane: Int, colorIndex: Int)] = []
     public var outgoing: [(fromLane: Int, toLane: Int, colorIndex: Int)] = []
     public var incoming: [(lane: Int, colorIndex: Int)] = []
+
+    // Tuples aren't Equatable, so the comparison can't be synthesized.
+    public static func == (a: GitGraphRow, b: GitGraphRow) -> Bool {
+        a.verticals.elementsEqual(b.verticals) { $0 == $1 }
+            && a.outgoing.elementsEqual(b.outgoing) { $0 == $1 }
+            && a.incoming.elementsEqual(b.incoming) { $0 == $1 }
+    }
 }
 
 public struct GitGraph: Equatable {
@@ -71,7 +78,7 @@ public enum GitGraphLayout {
 
         func allocate() -> Int {
             let lane: Int
-            if let first = freeLanes.first {
+            if !freeLanes.isEmpty {
                 lane = freeLanes.removeFirst()
             } else {
                 lane = nextLane

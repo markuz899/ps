@@ -30,6 +30,7 @@ extension MainWindowController {
                 case let .success(diff):
                     let document = Document(mode: .code)
                     document.customDisplayName = "\(commit.shortHash) · \(path)"
+                    document.isReadOnly = true
                     document.apply(.plain(diff, .standard))
                     document.setLanguage(LanguageRegistry.plainText, manual: true)
                     let tab = self.addTab(document)

@@ -81,6 +81,9 @@ final class Document: NSObject, NSTextStorageDelegate {
     /// Overrides the tab title (used e.g. for read-only diff tabs).
     var customDisplayName: String?
 
+    /// Generated, read-only content (a commit diff): never saved, backed up or restored.
+    var isReadOnly = false
+
     var displayName: String {
         if let customDisplayName { return customDisplayName }
         if let url { return url.lastPathComponent }

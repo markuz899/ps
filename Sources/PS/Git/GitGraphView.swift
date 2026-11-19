@@ -202,7 +202,6 @@ final class GitGraphController: NSViewController, NSTableViewDataSource, NSTable
         table.addTableColumn(column)
         table.headerView = nil
         table.style = .sourceList
-        table.selectionHighlightStyle = .sourceList
         table.rowHeight = GitGraphRowView.height
         table.intercellSpacing = NSSize(width: 0, height: 0)
         table.dataSource = self
@@ -254,7 +253,7 @@ final class GitGraphController: NSViewController, NSTableViewDataSource, NSTable
 
         store.onChange = { [weak self] in self?.reloadPreservingState() }
         scroll.contentView.postsBoundsChangedNotifications = true
-        scrollObserver = NotificationCenter.default.addObserver(for: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main) { [weak self] _ in
+        scrollObserver = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main) { [weak self] _ in
             self?.loadMoreIfNearBottom()
         }
         reloadPreservingState()

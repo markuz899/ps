@@ -380,7 +380,7 @@ final class SidebarController: NSViewController {
         switcher.segmentCount = 3
         switcher.setImage(NSImage(systemSymbolName: "folder", accessibilityDescription: L("Explorer")), forSegment: 0)
         switcher.setImage(NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: L("Search")), forSegment: 1)
-        switcher.setImage(NSImage(systemSymbolName: "gitbranch", accessibilityDescription: L("Git Graph")), forSegment: 2)
+        switcher.setImage(NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: L("Git Graph")), forSegment: 2)
         switcher.setToolTip(L("Explorer") + " (⇧⌘E)", forSegment: 0)
         switcher.setToolTip(L("Search") + " (⇧⌘F)", forSegment: 1)
         switcher.setToolTip(L("Git Graph"), forSegment: 2)

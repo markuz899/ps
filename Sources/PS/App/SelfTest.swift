@@ -830,6 +830,55 @@ enum SelfTest {
             if let window = MainWindowController.all.last, window !== controller { window.closeWindow() }
         }
 
+        var gitWindowWidth: CGFloat = 0
+        // Git Graph (the workspace is made a repository by the test script).
+        step("git graph") {
+            controller.showGitGraph(nil)
+        }
+        step("git graph wait") {}
+        step("git graph loaded") {
+            let store = controller.sidebar.graph.store
+            check(store.visible.count == 2, "the Git Graph lists the folder's commits (\(store.visible.count))")
+            guard let commit = store.commit(atVisibleRow: 0) else { return }
+            controller.gitGraph(didSelectCommit: commit.hash)
+            check(controller.gitDetailItem?.isCollapsed == false, "selecting a commit opens its details")
+            controller.openGitDiff(commit: commit, path: "README.md")
+        }
+        step("git graph wait 2") {}
+        step("git graph shot") { screenshot("23-git-graph") }
+        step("git diff tab") {
+            gitWindowWidth = controller.window?.frame.width ?? 0
+            check((controller.window?.frame.height ?? 0) > 600, "the window keeps its size with the commit details open (\(Int(controller.window?.frame.height ?? 0)) pt)")
+            guard let tab = controller.activeTab else { return }
+            check(tab.document.displayName.hasSuffix("README.md") && tab.document.isReadOnly, "a file's diff opens in a read-only tab (\(tab.document.displayName))")
+            check(tab.editor?.textView.isEditable == false && !tab.document.isDirty, "which can't be edited and isn't dirty")
+            controller.closeActiveTab(nil)
+            controller.setGitDetailCollapsed(true)
+            controller.sidebar.showExplorer()
+        }
+        step("git detail closed wait") {}
+        step("git detail closed") {
+            let width = controller.window?.frame.width ?? 0
+            check(abs(width - gitWindowWidth) < 1, "closing the commit details doesn't resize the window (\(Int(gitWindowWidth)) → \(Int(width)) pt)")
+        }
+
+        // No two menu items share a key combination.
+        step("menu clashes") {
+            var seen: [String: String] = [:]
+            var clashes: [String] = []
+            func walk(_ menu: NSMenu) {
+                for item in menu.items {
+                    if let submenu = item.submenu { walk(submenu); continue }
+                    let keys = MainWindowController.shortcut(of: item)
+                    guard !keys.isEmpty else { continue }
+                    if let other = seen[keys], other != item.title { clashes.append("\(keys): \(other) / \(item.title)") }
+                    seen[keys] = item.title
+                }
+            }
+            NSApp.mainMenu.map(walk)
+            check(clashes.isEmpty, "no two menu items share a shortcut \(clashes)")
+        }
+
         // Keyboard shortcuts list, built from the menus.
         step("shortcuts list") {
             let groups = ShortcutCatalog.groups()

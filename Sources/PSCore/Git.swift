@@ -89,8 +89,8 @@ public enum GitParser {
     public static func log(_ output: String) -> [GitCommit] {
         var commits: [GitCommit] = []
         for raw in output.split(separator: recordSeparator, omittingEmptySubsequences: true) {
-            var record = String(raw)
-            if record.hasSuffix("\n") { record.removeLast() }
+            // git ends every record with "\x1e\n", so the newline lands at the start of the next one.
+            let record = raw.trimmingCharacters(in: .newlines)
             let fields = record.split(separator: fieldSeparator, omittingEmptySubsequences: false).map(String.init)
             guard fields.count >= 7, !fields[0].isEmpty else { continue }
             let parents = fields[1].isEmpty ? [] : fields[1].split(separator: " ").map(String.init)
@@ -109,12 +109,13 @@ public enum GitParser {
         return commits
     }
 
-    /// `git for-each-ref --format=%(refname)%x1f%(*objectname)%x1f%(objectname)%x1e`
+    /// `git for-each-ref --format=%(refname)%1f%(*objectname)%1f%(objectname)%1e`
+    /// (for-each-ref spells hex escapes `%1f`, not `%x1f` like git log)
     public static func refs(_ output: String) -> [GitRef] {
         var refs: [GitRef] = []
         for raw in output.split(separator: recordSeparator, omittingEmptySubsequences: true) {
-            var record = String(raw)
-            if record.hasSuffix("\n") { record.removeLast() }
+            // git ends every record with "\x1e\n", so the newline lands at the start of the next one.
+            let record = raw.trimmingCharacters(in: .newlines)
             let fields = record.split(separator: fieldSeparator, omittingEmptySubsequences: false).map(String.init)
             guard fields.count >= 3, fields[0].hasPrefix("refs/") else { continue }
             // Annotated tags: *objectname is the peeled commit.
@@ -164,11 +165,12 @@ public enum GitParser {
         while i < fields.count {
             let field = fields[i]
             let parts = field.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
-            guard parts.count >= 3 else { i += 1; continue }
+            guard parts.count >= 2 else { i += 1; continue }
             let added = Int(parts[0])
             let deleted = Int(parts[1])
             i += 1
-            if parts[2].isEmpty, i + 1 < fields.count {
+            // A rename has no path after the counts (git writes "a\td\t", accept "a\td" too).
+            if parts.count < 3 || parts[2].isEmpty, i + 1 < fields.count {
                 // Rename: counts field carries no path, the next two fields are old and new.
                 result.append((added, deleted, fields[i], fields[i + 1]))
                 i += 2
@@ -215,7 +217,7 @@ public enum GitClient {
     /// Runs git synchronously; returns stdout. Throws on failure with stderr in the error.
     @discardableResult
     public static func run(_ args: [String], in root: URL) throws -> String {
-        guard let executable else { throw GitError.gitNotFound }
+        guard let executable = executable() else { throw GitError.gitNotFound }
         let process = Process()
         process.executableURL = executable
         process.arguments = args
@@ -261,7 +263,7 @@ public enum GitClient {
     /// HEAD is added explicitly so a detached HEAD's history is included; on an
     /// unborn branch `rev-list HEAD` fails, hence the fallback.
     public static func hashList(_ root: URL) throws -> [String] {
-        let output = (try? run(["rev-list", "--topo-order", "--all", "HEAD"], in: root))
+        let output = try (try? run(["rev-list", "--topo-order", "--all", "HEAD"], in: root))
             ?? run(["rev-list", "--all", "--topo-order"], in: root)
         return output
             .split(separator: "\n")
@@ -277,7 +279,7 @@ public enum GitClient {
     }
 
     public static func refs(_ root: URL) throws -> GitRefs {
-        let format = "%(refname)%x1f%(*objectname)%x1f%(objectname)%x1e"
+        let format = "%(refname)%1f%(*objectname)%1f%(objectname)%1e"
         let refs = GitParser.refs(try run(["for-each-ref", "--format=" + format], in: root))
         let branch = (try? run(["symbolic-ref", "-q", "--short", "HEAD"], in: root)).flatMap { $0.isEmpty ? nil : $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         let commit = (try? run(["rev-parse", "HEAD"], in: root)).flatMap { $0.isEmpty ? nil : $0.trimmingCharacters(in: .whitespacesAndNewlines) }

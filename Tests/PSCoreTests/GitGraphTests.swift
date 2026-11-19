@@ -132,7 +132,7 @@ final class GitGraphLayoutTests: XCTestCase {
         let graph = GitGraphLayout.layout(commits)
         let lanes = self.lanes(of: commits, graph: graph)
         XCTAssertEqual(lanes["M"], 0)
-        XCTAssertEqual([lanes["B"], lanes["C"], lanes["D"]].sorted(), [0, 1, 2])
+        XCTAssertEqual(["B", "C", "D"].compactMap { lanes[$0] }.sorted(), [0, 1, 2])
         XCTAssertEqual(lanes["A"], 0)
         let mergeEdges = graph.edges.filter { commits[$0.from].hash == "M" }
         XCTAssertEqual(mergeEdges.map(\.toLane).sorted(), [0, 1, 2])
