@@ -66,8 +66,40 @@ struct BoardRenderer {
     func draw(_ scene: BoardScene) {
         let byID = Dictionary(scene.elements.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         for element in scene.elements where !element.isDeleted {
+            if element.type == .image {
+                drawImage(element, files: scene.files)
+                continue
+            }
             draw(element, container: element.containerId.flatMap { byID[$0] })
         }
+    }
+
+    /// Decoded pictures, by file id: decoding a data URL on every frame would be slow.
+    private static var imageCache: [String: NSImage] = [:]
+
+    static func image(for fileID: String, in files: [String: BoardFile]) -> NSImage? {
+        if let cached = imageCache[fileID] { return cached }
+        guard let data = files[fileID]?.data, let image = NSImage(data: data) else { return nil }
+        imageCache[fileID] = image
+        return image
+    }
+
+    private func drawImage(_ element: BoardElement, files: [String: BoardFile]) {
+        let frame = BoardGeometry.bounds(of: element)
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        context.saveGState()
+        defer { context.restoreGState() }
+        if element.angle != 0 {
+            context.translateBy(x: frame.midX, y: frame.midY)
+            context.rotate(by: element.angle)
+            context.translateBy(x: -frame.midX, y: -frame.midY)
+        }
+        context.setAlpha(CGFloat(element.opacity / 100))
+        guard let fileID = element.fileId, let image = BoardRenderer.image(for: fileID, in: files) else {
+            draw(element)
+            return
+        }
+        image.draw(in: frame, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high.rawValue])
     }
 
     func draw(_ element: BoardElement, container: BoardElement? = nil) {
@@ -132,8 +164,8 @@ struct BoardRenderer {
             path.stroke()
         case .text:
             drawText(element, container: container)
-        case .other:
-            // Unsupported Excalidraw element (image, frame…): a dashed placeholder.
+        case .other, .image:
+            // Unsupported Excalidraw element (frame…) or a missing picture: a dashed placeholder.
             let path = NSBezierPath(rect: frame)
             path.setLineDash([4, 4], count: 2, phase: 0)
             (color("#868e96") ?? .gray).setStroke()

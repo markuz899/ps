@@ -649,11 +649,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, FileTree
         guard let pane = tab.pane else { return }
         let editor = editor(for: tab)
         showPanes()
+        // Instant swap: a cross-fade could leave the previous tab showing through.
         if editor.rootView.superview !== pane.container {
-            let transition = CATransition()
-            transition.type = .fade
-            transition.duration = 0.12
-            pane.container.layer?.add(transition, forKey: "swap")
             fill(pane.container, with: editor.rootView)
         }
         applyChrome(to: pane)

@@ -106,8 +106,12 @@ final class Highlighter {
         layoutManager?.removeTemporaryAttribute(.psMultiline, forCharacterRange: range)
     }
 
+    /// Called after colours were painted (the minimap redraws from them).
+    var onPainted: (() -> Void)?
+
     private func apply(_ tokens: [Token], text: NSString) {
         guard let layoutManager else { return }
+        defer { onPainted?() }
         for token in tokens {
             if let color = colors[token.scope] {
                 layoutManager.addTemporaryAttribute(.foregroundColor, value: color, forCharacterRange: token.range)

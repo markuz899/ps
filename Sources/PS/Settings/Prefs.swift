@@ -43,6 +43,7 @@ enum Prefs {
         static let boardGrid = "boardGrid"
         static let boardRoughness = "boardRoughness"
         static let boardFont = "boardFont"
+        static let showMinimap = "showMinimap"
     }
 
     static let defaults = UserDefaults.standard
@@ -73,6 +74,7 @@ enum Prefs {
             Key.boardGrid: true,
             Key.boardRoughness: 1.0,
             Key.boardFont: 1,
+            Key.showMinimap: true,
         ])
     }
 
@@ -98,6 +100,7 @@ enum Prefs {
     static var boardGrid: Bool { defaults.bool(forKey: Key.boardGrid) }
     static var boardRoughness: Double { defaults.double(forKey: Key.boardRoughness) }
     static var boardFont: Int { max(1, defaults.integer(forKey: Key.boardFont)) }
+    static var showMinimap: Bool { defaults.bool(forKey: Key.showMinimap) }
 
     /// "system", "light" or "dark": the app's appearance, independent of macOS if chosen.
     static func applyAppearance() {
@@ -132,7 +135,7 @@ enum Prefs {
         // showHidden must stay last: the window controller reads it from the end.
         [Key.codeFontName, Key.codeFontSize, Key.tabWidth, Key.insertSpaces, Key.wordWrap, Key.lineNumbers,
          Key.lightTheme, Key.darkTheme, Key.richFontName, Key.richFontSize, Key.appearance, Key.lineHeight,
-         Key.highlightCurrentLine, Key.highlightOccurrences, Key.colorSwatches, Key.spellCheck, Key.boardGrid,
+         Key.highlightCurrentLine, Key.highlightOccurrences, Key.colorSwatches, Key.spellCheck, Key.boardGrid, Key.showMinimap,
          Key.showHidden]
             .map { "\(defaults.object(forKey: $0) ?? "")" }
             .joined(separator: "|")

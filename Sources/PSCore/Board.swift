@@ -4,7 +4,7 @@ import Foundation
 /// open on excalidraw.com and the other way round. Unknown fields fall back to defaults.
 public struct BoardElement: Codable, Equatable {
     public enum Kind: String, Codable {
-        case rectangle, ellipse, diamond, arrow, line, freedraw, text
+        case rectangle, ellipse, diamond, arrow, line, freedraw, text, image
         case other
 
         public init(from decoder: Decoder) throws {
@@ -80,6 +80,8 @@ public struct BoardElement: Codable, Equatable {
     public var verticalAlign: String?
     public var containerId: String?
     public var lineHeight: Double?
+    /// Images: the key of the picture in the scene's `files`.
+    public var fileId: String?
 
     public init(type: Kind, x: Double, y: Double, width: Double = 0, height: Double = 0) {
         id = BoardElement.newID()
@@ -115,7 +117,7 @@ public struct BoardElement: Codable, Equatable {
         case strokeStyle, roughness, opacity, seed, roundness, groupIds, boundElements, isDeleted, locked
         case version, versionNonce, updated, points, startBinding, endBinding, startArrowhead, endArrowhead
         case text, originalText, fontSize, fontFamily, textAlign, verticalAlign, containerId, lineHeight
-        case frameId, link, simulatePressure, pressures, baseline
+        case frameId, link, simulatePressure, pressures, baseline, fileId, status, scale
     }
 
     public init(from decoder: Decoder) throws {
@@ -156,6 +158,7 @@ public struct BoardElement: Codable, Equatable {
         verticalAlign = try c.decodeIfPresent(String.self, forKey: .verticalAlign)
         containerId = try c.decodeIfPresent(String.self, forKey: .containerId)
         lineHeight = try c.decodeIfPresent(Double.self, forKey: .lineHeight)
+        fileId = try c.decodeIfPresent(String.self, forKey: .fileId)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -196,6 +199,11 @@ public struct BoardElement: Codable, Equatable {
                 try c.encode(startArrowhead, forKey: .startArrowhead)
                 try c.encode(endArrowhead, forKey: .endArrowhead)
             }
+        }
+        if type == .image {
+            try c.encode(fileId, forKey: .fileId)
+            try c.encode("saved", forKey: .status)
+            try c.encode([1.0, 1.0], forKey: .scale)
         }
         if type == .text {
             try c.encode(text ?? "", forKey: .text)
@@ -246,6 +254,8 @@ public struct BoardScene: Codable, Equatable {
     public var source = "https://github.com/markuz899/ps"
     public var elements: [BoardElement] = []
     public var appState = AppState()
+    /// Pictures used by image elements, embedded as data URLs (Excalidraw's `files`).
+    public var files: [String: BoardFile] = [:]
 
     public init(elements: [BoardElement] = []) {
         self.elements = elements
@@ -262,6 +272,7 @@ public struct BoardScene: Codable, Equatable {
         source = try c.decodeIfPresent(String.self, forKey: .source) ?? ""
         elements = try c.decodeIfPresent([BoardElement].self, forKey: .elements) ?? []
         appState = (try? c.decodeIfPresent(AppState.self, forKey: .appState)) ?? AppState()
+        files = (try? c.decodeIfPresent([String: BoardFile].self, forKey: .files)) ?? [:]
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -271,7 +282,9 @@ public struct BoardScene: Codable, Equatable {
         try c.encode(source, forKey: .source)
         try c.encode(elements, forKey: .elements)
         try c.encode(appState, forKey: .appState)
-        try c.encode([String: String](), forKey: .files)
+        // Only the pictures still used: deleting an image drops its data too.
+        let used = Set(elements.compactMap { $0.isDeleted ? nil : $0.fileId })
+        try c.encode(files.filter { used.contains($0.key) }, forKey: .files)
     }
 
     public static func decode(_ data: Data) throws -> BoardScene {
@@ -291,23 +304,65 @@ public struct BoardScene: Codable, Equatable {
     }
 
     /// Excalidraw's clipboard payload, so copied elements paste into excalidraw.com.
-    public static func clipboardJSON(_ elements: [BoardElement]) -> String? {
+    public static func clipboardJSON(_ elements: [BoardElement], files: [String: BoardFile] = [:]) -> String? {
         struct Clip: Encodable {
             let type = "excalidraw/clipboard"
             let elements: [BoardElement]
-            let files = [String: String]()
+            let files: [String: BoardFile]
         }
+        let used = Set(elements.compactMap(\.fileId))
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.withoutEscapingSlashes]
-        guard let data = try? encoder.encode(Clip(elements: elements)) else { return nil }
+        guard let data = try? encoder.encode(Clip(elements: elements, files: files.filter { used.contains($0.key) })) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
     public static func elements(fromClipboard text: String) -> [BoardElement]? {
-        struct Clip: Decodable { let type: String?; let elements: [BoardElement] }
+        clipboardContent(text)?.elements
+    }
+
+    public static func clipboardContent(_ text: String) -> (elements: [BoardElement], files: [String: BoardFile])? {
+        struct Clip: Decodable { let type: String?; let elements: [BoardElement]; let files: [String: BoardFile]? }
         guard let data = text.data(using: .utf8), let clip = try? JSONDecoder().decode(Clip.self, from: data),
               clip.type == nil || clip.type == "excalidraw/clipboard" || clip.type == "excalidraw" else { return nil }
-        return clip.elements
+        return (clip.elements, clip.files ?? [:])
+    }
+
+    /// Adds a picture and an image element showing it, fitted within `maxSide`.
+    @discardableResult
+    public mutating func addImage(data: Data, mimeType: String, size: CGSize, center: CGPoint, maxSide: Double = 480) -> BoardElement {
+        let id = BoardElement.newID()
+        files[id] = BoardFile(id: id, mimeType: mimeType, data: data)
+        let scale = min(1, maxSide / max(size.width, size.height, 1))
+        let width = max(8, size.width * scale)
+        let height = max(8, size.height * scale)
+        var element = BoardElement(type: .image, x: center.x - width / 2, y: center.y - height / 2, width: width, height: height)
+        element.fileId = id
+        element.roundness = nil
+        element.strokeColor = "transparent"
+        elements.append(element)
+        return element
+    }
+}
+
+/// A picture embedded in a board, as Excalidraw stores it.
+public struct BoardFile: Codable, Equatable {
+    public var id: String
+    public var mimeType: String
+    public var dataURL: String
+    public var created: Int
+
+    public init(id: String, mimeType: String, data: Data) {
+        self.id = id
+        self.mimeType = mimeType
+        dataURL = "data:\(mimeType);base64," + data.base64EncodedString()
+        created = Int(Date().timeIntervalSince1970 * 1000)
+    }
+
+    /// The decoded bytes of the data URL.
+    public var data: Data? {
+        guard let comma = dataURL.firstIndex(of: ",") else { return nil }
+        return Data(base64Encoded: String(dataURL[dataURL.index(after: comma)...]))
     }
 }
 
@@ -348,7 +403,7 @@ public enum BoardGeometry {
         guard frame.insetBy(dx: -tolerance - element.strokeWidth, dy: -tolerance - element.strokeWidth).contains(point) else { return false }
         let filled = element.backgroundColor != "transparent"
         switch element.type {
-        case .text, .other:
+        case .text, .other, .image:
             return true
         case .arrow, .line, .freedraw:
             let points = element.absolutePoints
@@ -383,7 +438,7 @@ public enum BoardGeometry {
     }
 
     public static func isBindable(_ element: BoardElement) -> Bool {
-        element.type.isShape || element.type == .text
+        element.type.isShape || element.type == .text || element.type == .image
     }
 
     /// Where an arrow should touch `element` when coming from `outside`: on its outline,

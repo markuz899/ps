@@ -13,6 +13,7 @@ ways, no dependencies.
 | ![Command palette](docs/screenshots/palette.png) | ![Whiteboard, dark mode](docs/screenshots/whiteboard-dark.png) |
 | ![Welcome screen](docs/screenshots/welcome.png) | ![Focus mode](docs/screenshots/focus.png) |
 | ![Settings](docs/screenshots/settings.png) | ![New tab button](docs/screenshots/new-tab.png) |
+| ![Whiteboard library and pictures](docs/screenshots/library.png) | ![Minimap](docs/screenshots/minimap.png) |
 
 ## Installation
 
@@ -113,10 +114,22 @@ architectures, application flows and diagrams, in the spirit of [Excalidraw](htt
   Delete, unlimited undo.
 - **Canvas**: pinch or ⌘-scroll to zoom, scroll or space-drag to pan, ⌘+ / ⌘- / ⌘0,
   dotted grid; in dark mode colours are inverted the way Excalidraw does it.
+- **Pictures**: paste an image (⌘V) or drop image files from the Finder; resize them from
+  the corners (proportions kept, ⇧ to free them). They're embedded in the `.excalidraw`
+  file the way Excalidraw stores them, so they open on excalidraw.com too.
+- **Library**: the Library button (top right) has ready-made pieces for diagrams —
+  database, server, user, queue, cloud, browser, phone, document, sticky note. Each is a
+  group of ordinary elements: move it as one, ungroup (⇧⌘G) to edit its parts.
 - **Export**: File ▸ Export as PNG… or ⌥⇧⌘C (the selection, or the whole board).
 
-Not supported yet: images on the board, rotation handles (rotated elements from Excalidraw
-are drawn rotated), frames, libraries, live collaboration.
+Not supported yet: rotation handles (rotated elements from Excalidraw are drawn rotated),
+frames, live collaboration.
+
+## Minimap
+
+Code files show a scaled-down map of the whole file on the right, in the syntax colours,
+with the visible part shaded: click or drag on it to jump. Settings ▸ Code Editor ▸
+Minimap turns it off.
 
 ## Tabs
 
@@ -134,10 +147,11 @@ live previews.
 | Section | Options |
 |---|---|
 | General | Appearance (Automatic / Light / Dark, independent of macOS), reopen the session at launch, auto-save (off / on focus change / every N seconds), hidden files |
-| Code Editor | Font, size and line height with a live preview, tab width, spaces vs tabs, line numbers, word wrap, current-line highlight, occurrence highlight, CSS colour swatches, auto-closing brackets |
+| Code Editor | Font, size and line height with a live preview, tab width, spaces vs tabs, line numbers, minimap, word wrap, current-line highlight, occurrence highlight, CSS colour swatches, auto-closing brackets |
 | Themes | One theme for light mode and one for dark mode, picked from preview cards; custom JSON themes in `~/Library/Application Support/PS/Themes` |
 | Documents | Default font and size for new text documents (with preview), spell checking |
 | Whiteboard | Dot grid, default sloppiness and font for new elements |
+| Keyboard Shortcuts | Every shortcut, searchable: read from the menus (always current) plus the ones outside them — whiteboard tools, mouse gestures, tabs |
 | About | Version and project link |
 
 ## Closing a folder
@@ -277,7 +291,7 @@ single cause.
 ### Acceptance criteria
 
 "Verified" = checked by running the app (`--selftest` + `--selftest-restore`, real windows and
-files, 137 checks, all passed in light and dark mode, plus 36 unit tests). "Deduced" = from the code only, not run.
+files, 148 checks, all passed in light and dark mode, plus 39 unit tests). "Deduced" = from the code only, not run.
 
 | Criterion | Outcome |
 |---|---|
@@ -331,7 +345,6 @@ dot), Italian interface and light mode.
 
 ### Not done or incomplete
 
-- **Minimap**: not implemented.
 - **Multiple cursors**: ↑/↓ and the other movements (Home/End, words) go back to a single
   caret; auto-closing of brackets doesn't apply with several carets.
 - **Drag and drop of tabs**: the self-test exercises the drop logic directly; a real

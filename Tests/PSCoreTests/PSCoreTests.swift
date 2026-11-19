@@ -421,7 +421,8 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(scene.elements[0].type, .ellipse)
         XCTAssertEqual(scene.elements[0].strokeColor, "#e03131")
         XCTAssertEqual(scene.elements[0].roughness, 1)
-        XCTAssertEqual(scene.elements[1].type, .other)
+        XCTAssertEqual(scene.elements[1].type, .image, "images are supported elements now")
+        XCTAssertEqual(scene.elements[1].fileId, "f")
         XCTAssertEqual(scene.appState.viewBackgroundColor, "#fffce8")
     }
 
@@ -475,5 +476,56 @@ final class BoardTests: XCTestCase {
         let first = (0..<5).map { _ in a.next() }
         XCTAssertEqual(first, (0..<5).map { _ in b.next() })
         XCTAssertTrue(first.allSatisfy { $0 >= -1 && $0 <= 1 })
+    }
+}
+
+final class BoardExtrasTests: XCTestCase {
+    func testImagesRoundTripInExcalidrawFormat() throws {
+        var scene = BoardScene()
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 1, 2, 3])
+        let image = scene.addImage(data: png, mimeType: "image/png", size: CGSize(width: 1000, height: 500), center: CGPoint(x: 0, y: 0))
+        XCTAssertEqual(image.width, 480, accuracy: 0.01, "large pictures are fitted")
+        XCTAssertEqual(image.height, 240, accuracy: 0.01)
+
+        let data = try scene.encoded()
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let files = try XCTUnwrap(json["files"] as? [String: [String: Any]])
+        let file = try XCTUnwrap(files[try XCTUnwrap(image.fileId)])
+        XCTAssertEqual(file["mimeType"] as? String, "image/png")
+        XCTAssertTrue((file["dataURL"] as? String)?.hasPrefix("data:image/png;base64,") == true)
+        let element = try XCTUnwrap((json["elements"] as? [[String: Any]])?.first)
+        XCTAssertEqual(element["type"] as? String, "image")
+        XCTAssertEqual(element["status"] as? String, "saved")
+
+        let loaded = try BoardScene.decode(data)
+        XCTAssertEqual(loaded.files[image.fileId!]?.data, png)
+        XCTAssertEqual(loaded.elements.first?.type, .image)
+
+        // A deleted image's data isn't written any more.
+        var trimmed = loaded
+        trimmed.elements.removeAll()
+        let empty = try XCTUnwrap(JSONSerialization.jsonObject(with: trimmed.encoded()) as? [String: Any])
+        XCTAssertEqual((empty["files"] as? [String: Any])?.count, 0)
+    }
+
+    func testClipboardCarriesImageFiles() throws {
+        var scene = BoardScene()
+        let image = scene.addImage(data: Data([1, 2, 3]), mimeType: "image/png", size: CGSize(width: 10, height: 10), center: .zero)
+        let text = try XCTUnwrap(BoardScene.clipboardJSON([image], files: scene.files))
+        let content = try XCTUnwrap(BoardScene.clipboardContent(text))
+        XCTAssertEqual(content.files[image.fileId!]?.data, Data([1, 2, 3]))
+    }
+
+    func testLibraryItemsAreGroupedAndCentred() {
+        XCTAssertEqual(BoardLibrary.items.count, 9)
+        for item in BoardLibrary.items {
+            let elements = BoardLibrary.make(item, at: CGPoint(x: 500, y: 300))
+            XCTAssertFalse(elements.isEmpty, item.id)
+            let groups = Set(elements.flatMap(\.groupIds))
+            XCTAssertEqual(groups.count, 1, "\(item.id) is one group")
+            let frame = BoardGeometry.bounds(of: elements)!
+            XCTAssertEqual(frame.midX, 500, accuracy: 1, item.id)
+            XCTAssertEqual(frame.midY, 300, accuracy: 1, item.id)
+        }
     }
 }

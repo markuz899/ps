@@ -10,6 +10,8 @@ final class BoardEditor: NSObject, DocumentEditor {
     private let toolbar = NSSegmentedControl()
     private let inspector: BoardInspector
     private let zoomLabel = NSButton(title: "100%", target: nil, action: nil)
+    let libraryButton = NSButton()
+    private lazy var libraryPanel: NSView = makeLibraryPanel()
     /// The protocol wants a text view; a board has none, this one is never shown.
     let textView = NSTextView()
     var onSelectionChange: (() -> Void)?
@@ -105,6 +107,20 @@ final class BoardEditor: NSObject, DocumentEditor {
         let inspectorPanel = floating(inspector, padding: 10)
         root.addSubview(inspectorPanel)
 
+        libraryButton.image = NSImage(systemSymbolName: "books.vertical", accessibilityDescription: L("Library"))?
+            .withSymbolConfiguration(.init(pointSize: 14, weight: .regular))
+        libraryButton.title = L("Library")
+        libraryButton.imagePosition = .imageLeading
+        libraryButton.bezelStyle = .texturedRounded
+        libraryButton.setButtonType(.pushOnPushOff)
+        libraryButton.target = self
+        libraryButton.action = #selector(toggleLibrary)
+        libraryButton.toolTip = L("Shapes for diagrams: database, server, user…")
+        let libraryButtonPanel = floating(libraryButton, padding: 4)
+        root.addSubview(libraryButtonPanel)
+        libraryPanel.isHidden = true
+        root.addSubview(libraryPanel)
+
         let zoomOut = NSButton(image: NSImage(systemSymbolName: "minus", accessibilityDescription: L("Zoom Out"))!, target: self, action: #selector(zoomOut))
         let zoomIn = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: L("Zoom In"))!, target: self, action: #selector(zoomIn))
         zoomLabel.target = self
@@ -137,6 +153,10 @@ final class BoardEditor: NSObject, DocumentEditor {
             inspectorPanel.bottomAnchor.constraint(lessThanOrEqualTo: zoomPanel.topAnchor, constant: -12),
             zoomPanel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             zoomPanel.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -12),
+            libraryButtonPanel.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
+            libraryButtonPanel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+            libraryPanel.topAnchor.constraint(equalTo: libraryButtonPanel.bottomAnchor, constant: 10),
+            libraryPanel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
         ])
         inspector.refresh()
     }
@@ -153,6 +173,42 @@ final class BoardEditor: NSObject, DocumentEditor {
     @objc private func toolPicked() {
         canvas.tool = BoardEditor.tools[toolbar.selectedSegment].0
         canvas.window?.makeFirstResponder(canvas)
+    }
+
+    @objc func toggleLibrary() {
+        libraryPanel.isHidden.toggle()
+        libraryButton.state = libraryPanel.isHidden ? .off : .on
+    }
+
+    var isLibraryVisible: Bool { !libraryPanel.isHidden }
+
+    /// A grid of the library items, each with a hand-drawn preview of itself.
+    private func makeLibraryPanel() -> NSView {
+        let grid = NSGridView()
+        grid.rowSpacing = 6
+        grid.columnSpacing = 6
+        var row: [NSView] = []
+        for (index, item) in BoardLibrary.items.enumerated() {
+            let button = LibraryButton(item: item) { [weak self] in
+                self?.canvas.insertLibraryItem(item)
+                self?.canvas.window?.makeFirstResponder(self?.canvas)
+            }
+            row.append(button)
+            if row.count == 3 || index == BoardLibrary.items.count - 1 {
+                grid.addRow(with: row)
+                row = []
+            }
+        }
+        let title = NSTextField(labelWithString: L("Library"))
+        title.font = .systemFont(ofSize: 11, weight: .semibold)
+        title.textColor = .secondaryLabelColor
+        let stack = NSStackView(views: [title, grid])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        let panel = floating(stack, padding: 10)
+        panel.setAccessibilityLabel(L("Library"))
+        return panel
     }
 
     @objc func zoomIn() { canvas.setZoom(canvas.zoom * 1.2) }
@@ -321,6 +377,7 @@ final class BoardInspector: NSView {
         let hasArrow = kinds.contains(.arrow) || tool == .arrow
         let hasCorners = !kinds.intersection([.rectangle, .diamond]).isEmpty || [.rectangle, .diamond].contains(tool)
         let onlyText = kinds == [.text] || tool == .text && kinds.isEmpty
+        let onlyImages = kinds == [.image]
         rows["background"]?.isHidden = !hasShape
         rows["fill"]?.isHidden = !hasShape
         rows["width"]?.isHidden = onlyText
@@ -331,6 +388,12 @@ final class BoardInspector: NSView {
         rows["fontFamily"]?.isHidden = !hasText
         rows["arrowhead"]?.isHidden = !hasArrow
         rows["actions"]?.isHidden = kinds.isEmpty
+        if onlyImages {
+            // Pictures only have opacity and layer order.
+            for key in ["stroke", "background", "fill", "width", "style", "sloppiness", "edges", "fontSize", "fontFamily", "arrowhead"] {
+                rows[key]?.isHidden = true
+            }
+        }
 
         let style = canvas.displayedStyle
         for (key, value, button) in swatchButtons {
@@ -589,4 +652,42 @@ final class BoardInspector: NSView {
             }
         }
     }
+}
+
+/// One library item: a small rendered preview and its name.
+private final class LibraryButton: NSButton {
+    private let handler: () -> Void
+
+    init(item: BoardLibrary.Item, handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(frame: .zero)
+        let elements = BoardLibrary.make(item, at: CGPoint(x: 0, y: 0), roughness: 0.6)
+        let preview = NSImage(size: NSSize(width: 64, height: 46), flipped: true) { rect in
+            guard let frame = BoardGeometry.bounds(of: elements), let context = NSGraphicsContext.current?.cgContext else { return false }
+            let scale = min((rect.width - 6) / max(frame.width, 1), (rect.height - 6) / max(frame.height, 1))
+            context.translateBy(x: rect.midX, y: rect.midY)
+            context.scaleBy(x: scale, y: scale)
+            context.translateBy(x: -frame.midX, y: -frame.midY)
+            let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            BoardRenderer(dark: dark).draw(BoardScene(elements: elements))
+            return true
+        }
+        image = preview
+        title = L(item.name)
+        font = .systemFont(ofSize: 10)
+        imagePosition = .imageAbove
+        isBordered = false
+        toolTip = L(item.name)
+        setAccessibilityLabel(L(item.name))
+        target = self
+        action = #selector(fire)
+        widthAnchor.constraint(equalToConstant: 72).isActive = true
+        heightAnchor.constraint(equalToConstant: 66).isActive = true
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
+    }
+
+    @objc private func fire() { handler() }
 }

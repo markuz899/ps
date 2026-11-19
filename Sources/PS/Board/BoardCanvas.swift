@@ -80,6 +80,7 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
         // Since macOS 14 views don't clip by default: the infinite canvas would paint
         // over the neighbouring pane.
         if #available(macOS 14, *) { clipsToBounds = true }
+        registerForDraggedTypes([.fileURL, .png, .tiff])
         setAccessibilityElement(true)
         setAccessibilityRole(.layoutArea)
         setAccessibilityLabel(L("Whiteboard"))
@@ -269,7 +270,7 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
                 return (.point(index), CGRect(x: p.x - size / 2, y: p.y - size / 2, width: size, height: size))
             }
         }
-        guard element.type.isShape else { return [] }
+        guard element.type.isShape || element.type == .image else { return [] }
         let frame = viewRect(BoardGeometry.bounds(of: element)).insetBy(dx: -6, dy: -6)
         let corners = [CGPoint(x: frame.minX, y: frame.minY), CGPoint(x: frame.maxX, y: frame.minY),
                        CGPoint(x: frame.maxX, y: frame.maxY), CGPoint(x: frame.minX, y: frame.maxY)]
@@ -472,7 +473,9 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
             }
             var width = abs(point.x - anchor.x)
             var height = abs(point.y - anchor.y)
-            if shift, frame.height > 0 {
+            // Pictures keep their proportions (Shift frees them); shapes do the opposite.
+            let keepRatio = (original.type == .image) != shift
+            if keepRatio, frame.height > 0 {
                 let ratio = frame.width / frame.height
                 if width / max(height, 0.1) > ratio { height = width / ratio } else { width = height * ratio }
             }
@@ -911,7 +914,7 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
 
     @objc func copy(_ sender: Any?) {
         let elements = selectedElements + boundTexts(of: selection)
-        guard !elements.isEmpty, let json = BoardScene.clipboardJSON(elements) else { return }
+        guard !elements.isEmpty, let json = BoardScene.clipboardJSON(elements, files: scene.files) else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(json, forType: .string)
@@ -924,11 +927,17 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
     }
 
     @objc func paste(_ sender: Any?) {
-        guard let text = NSPasteboard.general.string(forType: .string) else { return }
-        if let elements = BoardScene.elements(fromClipboard: text), !elements.isEmpty {
-            insert(copies(of: elements, offset: 20))
+        let pasteboard = NSPasteboard.general
+        let text = pasteboard.string(forType: .string)
+        if let text, let content = BoardScene.clipboardContent(text), !content.elements.isEmpty {
+            let pasted = copies(of: content.elements, offset: 20)
+            change { scene in scene.files.merge(content.files) { current, _ in current } }
+            insert(pasted)
             return
         }
+        // A picture (screenshot, copied image, image file from the Finder).
+        if insertImages(from: pasteboard, at: CGPoint(x: bounds.midX, y: bounds.midY)) { return }
+        guard let text else { return }
         // Plain text becomes a text element in the middle of the view.
         var element = newElement(.text, at: scenePoint(CGPoint(x: bounds.midX, y: bounds.midY)))
         element.text = text
@@ -937,6 +946,65 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
         element.width = size.width
         element.height = size.height
         insert([element])
+    }
+
+    // MARK: Images
+
+    /// Adds the pictures found on a pasteboard, centred on a view point. Returns false if none.
+    @discardableResult
+    func insertImages(from pasteboard: NSPasteboard, at viewPoint: CGPoint) -> Bool {
+        var pictures: [(Data, String, CGSize)] = []
+        let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        for url in urls {
+            guard let data = try? Data(contentsOf: url), let image = NSImage(data: data) else { continue }
+            let ext = url.pathExtension.lowercased()
+            let mime = ext == "jpg" || ext == "jpeg" ? "image/jpeg" : ext == "gif" ? "image/gif" : ext == "svg" ? "image/svg+xml" : "image/png"
+            if mime == "image/png", ext != "png", let png = BoardCanvas.pngData(of: image) {
+                pictures.append((png, "image/png", image.size))
+            } else {
+                pictures.append((data, mime, image.size))
+            }
+        }
+        if pictures.isEmpty, urls.isEmpty, let image = NSImage(pasteboard: pasteboard), let png = BoardCanvas.pngData(of: image) {
+            pictures.append((png, "image/png", image.size))
+        }
+        guard !pictures.isEmpty else { return false }
+        var center = scenePoint(viewPoint)
+        var added: [String] = []
+        change { scene in
+            for (data, mime, size) in pictures {
+                added.append(scene.addImage(data: data, mimeType: mime, size: size, center: center).id)
+                center.x += 30
+                center.y += 30
+            }
+        }
+        tool = .select
+        selection = Set(added)
+        return true
+    }
+
+    private static func pngData(of image: NSImage) -> Data? {
+        guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
+        return bitmap.representation(using: .png, properties: [:])
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let point = convert(sender.draggingLocation, from: nil)
+        if insertImages(from: sender.draggingPasteboard, at: point) { return true }
+        // Not a picture: open it in a tab, as anywhere else in the window.
+        let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        guard let controller = window?.windowController as? MainWindowController, !urls.isEmpty else { return false }
+        urls.forEach { controller.open($0) }
+        return true
+    }
+
+    // MARK: Library
+
+    func insertLibraryItem(_ item: BoardLibrary.Item) {
+        let center = scenePoint(CGPoint(x: bounds.midX, y: bounds.midY))
+        insert(BoardLibrary.make(item, at: center, stroke: style.strokeColor, roughness: style.roughness))
     }
 
     /// Copies with fresh ids; bindings, containers and groups point to the copies.

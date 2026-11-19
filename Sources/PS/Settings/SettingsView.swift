@@ -27,7 +27,7 @@ enum SettingsHost {
 /// System Settings–style window: sections in a sidebar, grouped forms on the right.
 struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
-        case general, editor, themes, documents, whiteboard, about
+        case general, editor, themes, documents, whiteboard, shortcuts, about
 
         var id: String { rawValue }
 
@@ -38,6 +38,7 @@ struct SettingsView: View {
             case .themes: return L("Themes")
             case .documents: return L("Documents")
             case .whiteboard: return L("Whiteboard")
+            case .shortcuts: return L("Keyboard Shortcuts")
             case .about: return L("About")
             }
         }
@@ -49,6 +50,7 @@ struct SettingsView: View {
             case .themes: return "paintpalette.fill"
             case .documents: return "doc.richtext.fill"
             case .whiteboard: return "scribble.variable"
+            case .shortcuts: return "keyboard.fill"
             case .about: return "info.circle.fill"
             }
         }
@@ -60,6 +62,7 @@ struct SettingsView: View {
             case .themes: return .purple
             case .documents: return .indigo
             case .whiteboard: return .pink
+            case .shortcuts: return .orange
             case .about: return .teal
             }
         }
@@ -92,6 +95,7 @@ struct SettingsView: View {
                     case .themes: ThemesPane()
                     case .documents: DocumentsPane()
                     case .whiteboard: WhiteboardPane()
+                    case .shortcuts: ShortcutsPane()
                     case .about: AboutPane()
                     }
                 }
@@ -251,6 +255,7 @@ private struct EditorPane: View {
     @AppStorage(Prefs.Key.autoCloseBrackets) private var autoCloseBrackets = true
     @AppStorage(Prefs.Key.highlightOccurrences) private var highlightOccurrences = true
     @AppStorage(Prefs.Key.colorSwatches) private var colorSwatches = true
+    @AppStorage(Prefs.Key.showMinimap) private var showMinimap = true
     @Environment(\.colorScheme) private var scheme
 
     private let monospaced = (NSFontManager.shared.availableFontNames(with: .fixedPitchFontMask) ?? []).sorted()
@@ -288,6 +293,8 @@ private struct EditorPane: View {
             }
             Card(L("Display")) {
                 toggleRow(L("Line numbers"), $lineNumbers)
+                Divided()
+                toggleRow(L("Minimap"), $showMinimap)
                 Divided()
                 toggleRow(L("Word wrap"), $wordWrap)
                 Divided()
@@ -505,5 +512,157 @@ private struct AboutPane: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 30)
+    }
+}
+
+// MARK: - Keyboard shortcuts
+
+struct ShortcutEntry: Identifiable, Hashable {
+    let title: String
+    let keys: String
+    var id: String { title + keys }
+}
+
+struct ShortcutGroup: Identifiable {
+    let title: String
+    let entries: [ShortcutEntry]
+    var id: String { title }
+}
+
+/// Every shortcut: read from the menu bar (so it's always current), plus the ones that
+/// aren't menu items (whiteboard tools, mouse gestures, tab handling).
+enum ShortcutCatalog {
+    static func groups() -> [ShortcutGroup] {
+        var groups: [ShortcutGroup] = []
+        for top in NSApp.mainMenu?.items ?? [] {
+            guard let menu = top.submenu else { continue }
+            var entries: [ShortcutEntry] = []
+            func walk(_ menu: NSMenu, prefix: String) {
+                for item in menu.items where !item.isSeparatorItem {
+                    if let submenu = item.submenu {
+                        walk(submenu, prefix: prefix + item.title + " › ")
+                        continue
+                    }
+                    let keys = MainWindowController.shortcut(of: item)
+                    guard !keys.isEmpty, !item.isHidden else { continue }
+                    entries.append(ShortcutEntry(title: prefix + item.title, keys: keys))
+                }
+            }
+            walk(menu, prefix: "")
+            if top.title == L("Window") {
+                entries.append(ShortcutEntry(title: L("Go to tab 1…8, last tab"), keys: "⌘1 … ⌘9"))
+            }
+            if !entries.isEmpty { groups.append(ShortcutGroup(title: top.title, entries: entries)) }
+        }
+        groups.append(ShortcutGroup(title: L("Tabs"), entries: [
+            ShortcutEntry(title: L("New file in this pane"), keys: L("double-click the tab bar")),
+            ShortcutEntry(title: L("Close a tab"), keys: L("middle-click")),
+            ShortcutEntry(title: L("Move a tab to another pane or window"), keys: L("drag it out of the bar")),
+        ]))
+        groups.append(ShortcutGroup(title: L("Code editing"), entries: [
+            ShortcutEntry(title: L("Indent / outdent the selection"), keys: "⇥ / ⇧⇥"),
+            ShortcutEntry(title: L("Add a caret"), keys: L("⌥ click")),
+            ShortcutEntry(title: L("Back to one caret"), keys: "⎋"),
+            ShortcutEntry(title: L("Jump with the minimap"), keys: L("click the minimap")),
+        ]))
+        let tools: [(String, String)] = [
+            ("Hand", "H"), ("Selection", "V · 1"), ("Rectangle", "R · 2"), ("Diamond", "D · 3"), ("Ellipse", "O · 4"),
+            ("Arrow", "A · 5"), ("Line", "L · 6"), ("Draw", "P · 7"), ("Text", "T · 8"), ("Eraser", "E · 0"),
+        ]
+        groups.append(ShortcutGroup(title: L("Whiteboard"), entries: tools.map { ShortcutEntry(title: L($0.0), keys: $0.1) } + [
+            ShortcutEntry(title: L("Pan the canvas"), keys: L("Space + drag")),
+            ShortcutEntry(title: L("Zoom"), keys: L("pinch · ⌘ scroll · ⌘+ ⌘−")),
+            ShortcutEntry(title: L("Square shapes, 15° lines"), keys: L("⇧ while drawing")),
+            ShortcutEntry(title: L("Write inside a shape"), keys: L("double-click · ↩")),
+            ShortcutEntry(title: L("Duplicate"), keys: "⌘D"),
+            ShortcutEntry(title: L("Group / ungroup"), keys: "⌘G / ⇧⌘G"),
+            ShortcutEntry(title: L("Nudge"), keys: L("arrows (⇧ ×10)")),
+            ShortcutEntry(title: L("Delete"), keys: "⌫"),
+        ]))
+        return groups
+    }
+}
+
+private struct ShortcutsPane: View {
+    @State private var query = ""
+    private let groups = ShortcutCatalog.groups()
+
+    private var filtered: [ShortcutGroup] {
+        guard !query.isEmpty else { return groups }
+        let needle = query.lowercased()
+        return groups.compactMap { group in
+            let entries = group.entries.filter { $0.title.lowercased().contains(needle) || $0.keys.lowercased().contains(needle) || group.title.lowercased().contains(needle) }
+            return entries.isEmpty ? nil : ShortcutGroup(title: group.title, entries: entries)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField(L("Search shortcuts"), text: $query).textFieldStyle(.plain)
+                if !query.isEmpty {
+                    Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }.buttonStyle(.plain)
+                }
+            }
+            .padding(8)
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+            .padding(.bottom, 14)
+            if filtered.isEmpty {
+                Text(L("No results")).foregroundStyle(.secondary).padding(.top, 20)
+            }
+            ForEach(filtered) { group in
+                Card(group.title) {
+                    ForEach(Array(group.entries.enumerated()), id: \.element.id) { index, entry in
+                        if index > 0 { Divided() }
+                        HStack {
+                            Text(entry.title)
+                            Spacer(minLength: 12)
+                            KeyCaps(keys: entry.keys)
+                        }
+                        .padding(.vertical, 5)
+                    }
+                }
+            }
+            Text(L("Shortcuts follow macOS conventions (and VS Code where they don't clash). They can't be changed yet."))
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Keys drawn as little key caps: "⇧⌘P" becomes ⇧ ⌘ P.
+private struct KeyCaps: View {
+    let keys: String
+
+    /// Symbol-only shortcuts are split into caps; anything with words is shown as text.
+    private var caps: [String]? {
+        let symbols = "⌃⌥⇧⌘"
+        guard keys.unicodeScalars.allSatisfy({ !CharacterSet.letters.contains($0) || keys.count <= 6 }), !keys.contains(" ") else { return nil }
+        var result: [String] = []
+        var rest = Substring(keys)
+        while let first = rest.first, symbols.contains(first) {
+            result.append(String(first))
+            rest = rest.dropFirst()
+        }
+        if !rest.isEmpty { result.append(String(rest)) }
+        return result
+    }
+
+    var body: some View {
+        if let caps {
+            HStack(spacing: 3) {
+                ForEach(Array(caps.enumerated()), id: \.offset) { _, cap in
+                    Text(cap)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .frame(minWidth: 22, minHeight: 20)
+                        .padding(.horizontal, cap.count > 1 ? 5 : 0)
+                        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 5))
+                        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
+                        .shadow(color: .black.opacity(0.12), radius: 0, y: 1)
+                }
+            }
+        } else {
+            Text(keys).font(.callout).foregroundStyle(.secondary)
+        }
     }
 }

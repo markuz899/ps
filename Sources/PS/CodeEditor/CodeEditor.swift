@@ -51,6 +51,9 @@ final class CodeEditor: NSObject, DocumentEditor, NSTextViewDelegate {
     /// Plain host view; the split with the Markdown preview is created only when needed
     /// (an always-present split view costs extra layout passes over the whole text).
     private let container = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+    /// The text plus its minimap, side by side; this is what goes into the preview split.
+    private let editorBox = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+    let minimap: MinimapView
     private var previewSplit: NSSplitView?
     private var preview: MarkdownPreview?
     var isPreviewVisible: Bool { preview != nil }
@@ -72,9 +75,17 @@ final class CodeEditor: NSObject, DocumentEditor, NSTextViewDelegate {
         ruler = LineNumberRuler(textView: codeView, document: document)
         scrollView.verticalRulerView = ruler
         scrollView.hasVerticalRuler = true
+        minimap = MinimapView(textView: codeView, document: document)
         scrollView.autoresizingMask = [.width, .height]
-        container.addSubview(scrollView)
+        minimap.autoresizingMask = [.height, .minXMargin]
+        editorBox.autoresizingMask = [.width, .height]
+        editorBox.addSubview(scrollView)
+        editorBox.addSubview(minimap)
+        container.addSubview(editorBox)
         super.init()
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(editorScrolled), name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
+        highlighter.onPainted = { [weak self] in self?.minimap.needsDisplay = true }
 
         let view = codeView
         view.delegate = self
@@ -98,6 +109,7 @@ final class CodeEditor: NSObject, DocumentEditor, NSTextViewDelegate {
         document.editObservers.append { [weak self] range, _ in
             self?.highlighter.edited(range)
             self?.ruler.refresh()
+            self?.minimap.needsDisplay = true
             self?.preview?.scheduleRender()
         }
         applyPreferences()
@@ -107,13 +119,26 @@ final class CodeEditor: NSObject, DocumentEditor, NSTextViewDelegate {
         onSelectionChange?()
     }
 
+    @objc private func editorScrolled() {
+        minimap.needsDisplay = true
+    }
+
+    /// Lays out text and minimap inside the editor box.
+    private func setMinimapVisible(_ visible: Bool) {
+        let bounds = editorBox.bounds
+        let mapWidth = visible ? MinimapView.width : 0
+        minimap.isHidden = !visible
+        scrollView.frame = NSRect(x: 0, y: 0, width: bounds.width - mapWidth, height: bounds.height)
+        minimap.frame = NSRect(x: bounds.width - mapWidth, y: 0, width: MinimapView.width, height: bounds.height)
+    }
+
     func togglePreview() {
         if preview != nil {
             previewSplit?.removeFromSuperview()
             previewSplit = nil
             preview = nil
-            scrollView.frame = container.bounds
-            container.addSubview(scrollView)
+            editorBox.frame = container.bounds
+            container.addSubview(editorBox)
             return
         }
         let preview = MarkdownPreview(document: document, source: scrollView)
@@ -122,8 +147,8 @@ final class CodeEditor: NSObject, DocumentEditor, NSTextViewDelegate {
         split.isVertical = true
         split.dividerStyle = .thin
         split.autoresizingMask = [.width, .height]
-        scrollView.removeFromSuperview()
-        split.addSubview(scrollView)
+        editorBox.removeFromSuperview()
+        split.addSubview(editorBox)
         split.addSubview(preview.scrollView)
         container.addSubview(split)
         previewSplit = split
@@ -170,6 +195,10 @@ final class CodeEditor: NSObject, DocumentEditor, NSTextViewDelegate {
         scrollView.backgroundColor = background
 
         ruler.apply(theme: theme, font: font)
+        minimap.foreground = foreground
+        minimap.background = theme?.color("gutter") ?? background
+        setMinimapVisible(Prefs.showMinimap)
+        minimap.needsDisplay = true
         scrollView.rulersVisible = Prefs.lineNumbers
         setWrap(Prefs.wordWrap)
         highlighter.configure(theme: theme, visibleRange: visibleCharacterRange)

@@ -703,7 +703,11 @@ enum SelfTest {
             let before = controller.tabs.count
             controller.open(src.appendingPathComponent("style.css"))
             check(controller.tabs.count == before, "opening style.css again doesn't duplicate it in the first window")
-            check(second.window?.isKeyWindow == true || NSApp.keyWindow === second.window, "the window that has it comes forward")
+            // Ordering, not key status: key depends on which app the person is using meanwhile.
+            let order = NSApp.orderedWindows
+            let front = second.window.flatMap { order.firstIndex(of: $0) } ?? .max
+            let back = controller.window.flatMap { order.firstIndex(of: $0) } ?? .max
+            check(front < back, "the window that has it comes forward")
             // Back: drag the tab from the second window into the first; the empty window closes.
             TabDrag.tab = second.tabs.first
             controller.acceptDraggedTab(into: controller.panes[0], at: nil)
@@ -826,6 +830,78 @@ enum SelfTest {
             if let window = MainWindowController.all.last, window !== controller { window.closeWindow() }
         }
 
+        // Keyboard shortcuts list, built from the menus.
+        step("shortcuts list") {
+            let groups = ShortcutCatalog.groups()
+            let entries = groups.flatMap(\.entries)
+            check(entries.count > 60, "Settings lists the shortcuts (\(entries.count) in \(groups.count) groups)")
+            check(entries.contains { $0.title.hasSuffix(L("Command Palette…")) && $0.keys == "⇧⌘P" }, "including menu shortcuts like ⇧⌘P Command Palette")
+            check(groups.contains { $0.title == L("Whiteboard") }, "and the whiteboard keys that aren't in the menus")
+        }
+
+        // Whiteboard: pictures and the shape library.
+        step("board images") {
+            controller.newWhiteboard(nil)
+            guard let board = controller.activeTab?.editor as? BoardEditor else { return }
+            let picture = NSImage(size: NSSize(width: 400, height: 200), flipped: false) { rect in
+                NSGradient(colors: [.systemPurple, .systemOrange])?.draw(in: rect, angle: 0)
+                return true
+            }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.writeObjects([picture])
+            board.canvas.paste(nil)
+            let image = board.canvas.scene.visible.first { $0.type == .image }
+            check(image != nil && image.flatMap { board.canvas.scene.files[$0.fileId ?? ""] } != nil, "pasting a picture puts it on the board")
+            check(abs((image?.width ?? 0) / max(1, image?.height ?? 1) - 2) < 0.05, "with its proportions")
+            board.toggleLibrary()
+            check(board.isLibraryVisible, "the Library button opens the shape library")
+            let before = board.canvas.scene.visible.count
+            if let database = BoardLibrary.items.first(where: { $0.id == "database" }) { board.canvas.insertLibraryItem(database) }
+            let added = board.canvas.scene.visible.count - before
+            check(added >= 4 && board.canvas.selection.count == added, "a library item is inserted as one selected group (\(added) elements)")
+            if let server = BoardLibrary.items.first(where: { $0.id == "server" }) { board.canvas.insertLibraryItem(server) }
+            board.canvas.zoomToFit()
+        }
+        step("board images shot") {
+            screenshot("21-library")
+            guard let tab = controller.activeTab else { return }
+            let url = workspace.appendingPathComponent("docs/assets.excalidraw")
+            controller.write(tab, to: url) { _ in }
+            controller.closeActiveTab(nil)
+            controller.open(url)
+        }
+        step("board images reopened") {
+            let scene = controller.activeTab?.document.board
+            let image = scene?.visible.first { $0.type == .image }
+            check(image.flatMap { scene?.files[$0.fileId ?? ""]?.data } != nil, "the picture is saved inside the .excalidraw file")
+            controller.closeActiveTab(nil)
+        }
+
+        // Minimap beside the code.
+        step("minimap") {
+            controller.newCodeFile(nil)
+            guard let editor = controller.activeTab?.editor as? CodeEditor else { return }
+            editor.codeView.insertText((1...400).map { "let value\($0) = compute(\($0)) // line \($0)" }.joined(separator: "\n"), replacementRange: NSRange(location: NSNotFound, length: 0))
+            check(!editor.minimap.isHidden && editor.minimap.frame.width == MinimapView.width, "the minimap sits beside the code")
+            screenshot("22-minimap")
+        }
+        step("minimap jump") {
+            guard let editor = controller.activeTab?.editor as? CodeEditor, let clip = editor.codeView.enclosingScrollView?.contentView else { return }
+            clip.scroll(to: .zero)
+            editor.minimap.jump(to: editor.minimap.bounds.height * 0.9)
+            check(clip.bounds.minY > 200, "clicking low on the minimap scrolls the code down (\(Int(clip.bounds.minY)) pt)")
+            Prefs.defaults.set(false, forKey: Prefs.Key.showMinimap)
+        }
+        step("minimap off") {
+            guard let editor = controller.activeTab?.editor as? CodeEditor else { return }
+            check(editor.minimap.isHidden, "the Minimap setting hides it")
+            Prefs.defaults.set(true, forKey: Prefs.Key.showMinimap)
+            editor.codeView.selectAll(nil)
+            editor.codeView.delete(nil)
+            controller.closeActiveTab(nil)
+        }
+
         // Two dirty files, then quit.
         step("dirty two files") {
             for name in ["index.ts", "query.sql"] {
@@ -882,6 +958,29 @@ enum SelfTest {
         step("middle") {
             if controller.activePane.tabs.count == 3 { controller.activate(controller.activePane.tabs[1]) }
             screenshot("tabs")
+        }
+        step("code then board") {
+            controller.activePane.tabs[1].editor?.textView.insertText((1...60).map { "let value\($0) = \($0)" }.joined(separator: "\n"), replacementRange: NSRange(location: NSNotFound, length: 0))
+            controller.splitEditor(nil)
+        }
+        step("left pane board") {
+            if let left = controller.panes.first, let code = left.activeTab { controller.activate(code) }
+            controller.newWhiteboard(nil)
+            guard let board = controller.activeTab?.editor as? BoardEditor else { return }
+            let picture = NSImage(size: NSSize(width: 400, height: 200), flipped: false) { rect in
+                NSGradient(colors: [.systemPurple, .systemOrange])?.draw(in: rect, angle: 0)
+                return true
+            }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.writeObjects([picture])
+            board.canvas.paste(nil)
+            board.toggleLibrary()
+            if let server = BoardLibrary.items.first(where: { $0.id == "server" }) { board.canvas.insertLibraryItem(server) }
+            board.canvas.zoomToFit()
+        }
+        step("wait") {}
+        step("board shot") {
+            screenshot("board")
         }
     }
 
