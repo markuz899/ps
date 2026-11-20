@@ -85,6 +85,13 @@ enum SelfTest {
         )!
     }
 
+    /// AppKit closes the automatic undo group at the end of a real event; steps run from
+    /// timers, so close it by hand where a test needs two separate undo steps.
+    private static func endEventUndoGroup(_ manager: UndoManager?) {
+        guard let manager, manager.groupsByEvent, manager.groupingLevel > 0 else { return }
+        manager.endUndoGrouping()
+    }
+
     private static func drag(_ view: NSView, from start: CGPoint, to end: CGPoint, steps: Int = 6) {
         view.mouseDown(with: mouse(.leftMouseDown, view, start))
         for step in 1...steps {
@@ -785,6 +792,19 @@ enum SelfTest {
             drag(canvas, from: CGPoint(x: 160, y: 380), to: CGPoint(x: 400, y: 420), steps: 12)
             check(canvas.scene.visible.contains { $0.type == .freedraw && ($0.points?.count ?? 0) > 5 }, "the pencil draws a free stroke")
         }
+        step("laser") {
+            guard let canvas = (controller.activeTab?.editor as? BoardEditor)?.canvas else { return }
+            let before = canvas.scene.elements.count
+            canvas.tool = .laser
+            drag(canvas, from: CGPoint(x: 200, y: 480), to: CGPoint(x: 600, y: 470), steps: 12)
+            check(canvas.scene.elements.count == before && canvas.laserPointCount > 5, "the laser pointer leaves a trail without adding anything to the board")
+            canvas.tool = .select
+        }
+        step("laser wait") {}
+        step("laser faded") {
+            guard let canvas = (controller.activeTab?.editor as? BoardEditor)?.canvas else { return }
+            check(canvas.laserPointCount == 0, "and the trail fades away by itself")
+        }
         step("board copy") {
             guard let canvas = (controller.activeTab?.editor as? BoardEditor)?.canvas else { return }
             canvas.selectAll(nil)
@@ -935,6 +955,42 @@ enum SelfTest {
             controller.closeActiveTab(nil)
             controller.closeActiveTab(nil)
             controller.sidebar.showExplorer()
+        }
+
+        // Renaming an HTML tag renames its partner.
+        step("linked tags") {
+            let page = workspace.appendingPathComponent("src/page.html")
+            let original = "<section>\n  <div class=\"a\"><div>x</div></div>\n</section>\n"
+            try? original.write(to: page, atomically: true, encoding: .utf8)
+            controller.open(page) { tab in
+                guard let view = (tab?.editor as? CodeEditor)?.codeView else { check(false, "page.html opens"); return }
+                let none = NSRange(location: NSNotFound, length: 0)
+                view.setSelectedRange(NSRange(location: (view.string as NSString).range(of: "<div class").location + 4, length: 0))
+                view.insertText("x", replacementRange: none)
+                check(view.string == "<section>\n  <divx class=\"a\"><div>x</div></divx>\n</section>\n", "typing in an opening tag renames the closing one, skipping the nested pair")
+                view.setSelectedRange(NSRange(location: (view.string as NSString).range(of: "</section>").location + 9, length: 0))
+                view.deleteBackward(nil)
+                view.insertText("n", replacementRange: none)
+                check(view.string.hasPrefix("<section>") && view.string.hasSuffix("</section>\n"), "and editing a closing tag renames the opening one")
+            }
+        }
+        // A separate event: undo groups everything one event does.
+        step("linked tags replace") {
+            guard let view = (controller.activeTab?.editor as? CodeEditor)?.codeView else { return }
+            endEventUndoGroup(view.undoManager)
+            view.breakUndoCoalescing()  // what a click or an arrow key does
+            view.setSelectedRange(NSRange(location: (view.string as NSString).range(of: "<divx").location + 1, length: 4))
+            view.insertText("p", replacementRange: NSRange(location: NSNotFound, length: 0))
+            check(view.string.contains("<p class") && view.string.contains("</div></p>"), "replacing a selected tag name renames both (\(view.string.debugDescription))")
+        }
+        step("linked tags undo") {
+            guard let tab = controller.activeTab, let view = (tab.editor as? CodeEditor)?.codeView else { return }
+            endEventUndoGroup(tab.document.undoManager)
+            tab.document.undoManager.undo()
+            check(view.string.contains("<divx class") && view.string.contains("</divx>"), "one undo reverts both names (\(view.string.debugDescription))")
+            while tab.document.undoManager.canUndo { tab.document.undoManager.undo() }
+            check(!view.string.contains("divx") && view.string.hasPrefix("<section>"), "undo goes back to the original")
+            controller.closeActiveTab(nil)
         }
 
         // PDF of a whiteboard (vector, one page) and of a formatted document (paginated).
