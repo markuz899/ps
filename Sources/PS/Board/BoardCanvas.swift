@@ -21,7 +21,7 @@ struct BoardStyle {
 /// through `change(_:)`, which records undo and marks the document modified.
 final class BoardCanvas: NSView, NSTextViewDelegate {
     enum Tool: Int, CaseIterable {
-        case hand, select, rectangle, diamond, ellipse, arrow, line, draw, text, eraser
+        case hand, select, rectangle, diamond, ellipse, arrow, line, draw, text, eraser, laser
     }
 
     private enum Handle {
@@ -62,6 +62,11 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
 
     private var interaction = Interaction.none
     private var spacePanning = false
+    /// Laser pointer trail, in view coordinates: it points at the screen, not at the drawing.
+    private var laserTrail: [(point: CGPoint, time: TimeInterval)] = []
+    private var laserTimer: Timer?
+    static let laserFade: TimeInterval = 0.7
+    var laserPointCount: Int { laserTrail.count }
     private var textEditor: NSTextView?
     private var editingID: String?
     private var editingIsNew = false
@@ -297,6 +302,7 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
                 }
             }
         }
+        drawLaser()
         if case let .marquee(start, current) = interaction {
             let rect = viewRect(CGRect(x: min(start.x, current.x), y: min(start.y, current.y), width: abs(current.x - start.x), height: abs(current.y - start.y)))
             accent.withAlphaComponent(0.08).setFill()
@@ -402,8 +408,52 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
             beginGesture()
             interaction = .erasing
             erase(at: point)
+        case .laser:
+            addLaserPoint(view)
         }
         needsDisplay = true
+    }
+
+    // MARK: Laser
+
+    private func addLaserPoint(_ point: CGPoint) {
+        laserTrail.append((point, ProcessInfo.processInfo.systemUptime))
+        needsDisplay = true
+        guard laserTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] timer in
+            guard let self else { return timer.invalidate() }
+            let now = ProcessInfo.processInfo.systemUptime
+            self.laserTrail.removeAll { now - $0.time > BoardCanvas.laserFade }
+            self.needsDisplay = true
+            if self.laserTrail.isEmpty {
+                timer.invalidate()
+                self.laserTimer = nil
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        laserTimer = timer
+    }
+
+    /// A red stroke that thins and fades from the tip back, with a soft glow.
+    private func drawLaser() {
+        guard laserTrail.count > 0 else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        for (glow, width, alpha) in [(true, 10.0, 0.18), (false, 4.0, 1.0)] {
+            for index in laserTrail.indices.dropFirst() {
+                let life = max(0, 1 - (now - laserTrail[index].time) / BoardCanvas.laserFade)
+                let path = NSBezierPath()
+                path.move(to: laserTrail[index - 1].point)
+                path.line(to: laserTrail[index].point)
+                path.lineWidth = width * (glow ? 1 : 0.4 + 0.6 * life)
+                path.lineCapStyle = .round
+                NSColor.systemRed.withAlphaComponent(alpha * life).setStroke()
+                path.stroke()
+            }
+        }
+        if let tip = laserTrail.last, now - tip.time < BoardCanvas.laserFade {
+            NSColor.systemRed.setFill()
+            NSBezierPath(ovalIn: NSRect(x: tip.point.x - 3.5, y: tip.point.y - 3.5, width: 7, height: 7)).fill()
+        }
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -412,7 +462,7 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
         let shift = event.modifierFlags.contains(.shift)
         switch interaction {
         case .none:
-            break
+            if tool == .laser { addLaserPoint(view) }
         case let .creating(id, origin):
             change { scene in
                 update(id, in: &scene) { element in
@@ -782,7 +832,7 @@ final class BoardCanvas: NSView, NSTextViewDelegate {
             let tools: [String: Tool] = [
                 "h": .hand, "v": .select, "1": .select, "r": .rectangle, "2": .rectangle, "d": .diamond, "3": .diamond,
                 "o": .ellipse, "4": .ellipse, "a": .arrow, "5": .arrow, "l": .line, "6": .line, "p": .draw, "7": .draw,
-                "t": .text, "8": .text, "e": .eraser, "0": .eraser,
+                "t": .text, "8": .text, "e": .eraser, "0": .eraser, "k": .laser,
             ]
             if let tool = tools[characters] {
                 self.tool = tool

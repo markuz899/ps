@@ -18,7 +18,23 @@ ways, no dependencies.
 
 ## Installation
 
-There is no ready-made release: you build the app from source (about a minute).
+**Download (macOS only)**
+
+1. Download `PS-<version>.dmg` from the
+   [latest release](https://github.com/markuz899/ps/releases/latest).
+2. Open it and drag **PS** onto **Applications**.
+3. The first time, macOS blocks it because the app isn't signed with an Apple developer
+   certificate: right-click PS in Applications ▸ Open ▸ Open (on macOS 15, System Settings ▸
+   Privacy & Security ▸ "Open Anyway"), or run
+   `xattr -dr com.apple.quarantine /Applications/PS.app`.
+
+The app is native AppKit, so there is no Linux or Windows version.
+
+**Building a release**: `./scripts/make-dmg.sh` builds the universal app and
+`build/PS-<version>.dmg` (version from `Resources/Info.plist`), then prints its SHA-256.
+Upload the DMG as an asset of a GitHub release.
+
+**Building from source**
 
 **Requirements**
 
@@ -104,7 +120,9 @@ architectures, application flows and diagrams, in the spirit of [Excalidraw](htt
   format: paste them straight into excalidraw.com (and back).
 - **Tools** (same keys as Excalidraw): hand `H`, selection `V`/`1`, rectangle `R`/`2`,
   diamond `D`/`3`, ellipse `O`/`4`, arrow `A`/`5`, line `L`/`6`, pencil `P`/`7`,
-  text `T`/`8`, eraser `E`/`0`. Shift keeps squares and 15° angles.
+  text `T`/`8`, eraser `E`/`0`, laser pointer `K`. Shift keeps squares and 15° angles.
+- **Laser pointer** (`K`): drag to leave a red trail that fades away in under a second,
+  for pointing at things during a call or a presentation. It adds nothing to the board.
 - **Hand-drawn look**: sketchy strokes with three levels of sloppiness (architect, artist,
   cartoonist), hachure / cross-hatch / solid fills, stroke colours and widths, dashed and
   dotted lines, rounded or sharp corners, opacity, a hand-written font.
@@ -149,7 +167,8 @@ Not yet: staging single hunks, discarding changes, branches from the Source Cont
 **⌘-click** on a name (or **F12** with the caret on it) opens the file where it's declared
 and selects the declaration — for example a function called from a controller and defined
 in a service in another folder. With several candidates a menu lets you pick; the current
-file comes first, then files in the same language.
+file comes first, then files in the same language. ⌘-click on a web link written in the code
+(`https://…`, `www.…`, `mailto:`), in a comment or a string, opens it in the browser.
 
 **⌥⎋** (Edit ▸ Complete) suggests the names declared anywhere in the folder plus the words of
 the current file.
@@ -218,6 +237,7 @@ still marked unsaved, the next time PS starts (kept in
 | **Replace in folder** | In the Search pane: "Replace All…" shows every change (− old line / + new line) before applying it. Open files are changed in their tab (undoable), the others on disk keeping encoding and line endings; `.rtf` files on disk are skipped. |
 | **Code as image** | ⌥⇧⌘C copies to the clipboard (or Code ▸ Export Code as Image…) a 2× PNG of the selection or the whole file: macOS-style window on the app gradient, with the theme's colours. |
 | **Breadcrumb** | Under the tabs: folder › file › enclosing declarations (`Greeter › greet`). Clicking the file or a declaration opens the file's outline; clicking a folder reveals it in the sidebar. |
+| **Linked tag names** | In HTML, XML and PHP, typing or deleting in a tag's name renames its partner too (`<div>` ↔ `</div>`), skipping nested pairs, comments and self-closing tags; one undo reverts both. |
 | **Multiple cursors** | ⌥click adds a caret, ⌘D selects the next occurrence, ⌥⌘↑/↓ add a caret above/below, Esc goes back to one. Typing, Backspace, Return, Tab, ←/→ and paste (one line per caret when the counts match) act on all of them; one undo reverts everything. |
 
 ## Module structure

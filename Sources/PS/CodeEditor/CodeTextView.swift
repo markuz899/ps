@@ -250,6 +250,10 @@ final class CodeTextView: NSTextView {
         if event.modifierFlags.contains(.command), event.clickCount == 1, !event.modifierFlags.contains(.shift),
            let controller = window?.windowController as? MainWindowController {
             let index = characterIndexForInsertion(at: point)
+            if let url = CodeLink.url(in: nsString, at: index) {
+                NSWorkspace.shared.open(url)
+                return
+            }
             if let word = MainWindowController.word(in: nsString, at: index) {
                 setSelectedRange(NSRange(location: index, length: 0))
                 controller.goToDefinition(of: word, from: self, at: point)
@@ -467,6 +471,10 @@ final class CodeTextView: NSTextView {
             replaceAtCursors(allCursors, with: text)
             return
         }
+        if let typed = insertString as? String, replacementRange.location == NSNotFound,
+           renameTag(replacing: selectedRange(), with: typed) {
+            return
+        }
         guard let typed = insertString as? String, typed.count == 1, let key = typed.first,
               replacementRange.location == NSNotFound, !hasMarkedText() else {
             super.insertText(insertString, replacementRange: replacementRange)
@@ -506,6 +514,8 @@ final class CodeTextView: NSTextView {
             return
         }
         let selection = selectedRange()
+        let deleted = selection.length > 0 ? selection : NSRange(location: selection.location - 1, length: 1)
+        if selection.location > 0 || selection.length > 0, renameTag(replacing: deleted, with: "") { return }
         if selection.length == 0, selection.location > 0,
            let previous = character(at: selection.location - 1), let next = character(at: selection.location),
            language.pairs.contains(where: { $0.open == previous && $0.close == next }) {
@@ -513,6 +523,38 @@ final class CodeTextView: NSTextView {
             return
         }
         super.deleteBackward(sender)
+    }
+
+    override func deleteForward(_ sender: Any?) {
+        let selection = selectedRange()
+        let deleted = selection.length > 0 ? selection : NSRange(location: selection.location, length: 1)
+        if extraCursors.isEmpty, NSMaxRange(deleted) <= nsString.length, renameTag(replacing: deleted, with: "") { return }
+        super.deleteForward(sender)
+    }
+
+    /// Typing or deleting inside `<div` renames its `</div>` too, and the other way round
+    /// (VS Code's linked editing). One undo step covers both. False when it doesn't apply.
+    private func renameTag(replacing range: NSRange, with text: String) -> Bool {
+        guard extraCursors.isEmpty, !hasMarkedText(), TagPair.languages.contains(language.id),
+              text.utf16.allSatisfy(TagPair.isNameCharacter),
+              let pair = TagPair.partner(in: nsString, at: range.location),
+              range.location >= pair.own.location, NSMaxRange(range) <= NSMaxRange(pair.own) else { return false }
+        let name = (nsString.substring(with: pair.own) as NSString)
+            .replacingCharacters(in: NSRange(location: range.location - pair.own.location, length: range.length), with: text)
+        // An empty or invalid name is left to the normal edit; the partner keeps its name.
+        guard let first = name.first, first.isLetter else { return false }
+        let ranges = [pair.own, pair.partner].sorted { $0.location < $1.location }
+        guard shouldChangeText(inRanges: ranges.map { NSValue(range: $0) }, replacementStrings: [name, name]) else { return true }
+        textStorage?.beginEditing()
+        for target in ranges.reversed() {
+            textStorage?.replaceCharacters(in: target, with: NSAttributedString(string: name, attributes: typingAttributes))
+        }
+        textStorage?.endEditing()
+        didChangeText()
+        let growth = (name as NSString).length - pair.own.length
+        let caret = range.location + (text as NSString).length + (pair.partner.location < pair.own.location ? growth : 0)
+        setSelectedRange(NSRange(location: caret, length: 0))
+        return true
     }
 
     override func insertNewline(_ sender: Any?) {

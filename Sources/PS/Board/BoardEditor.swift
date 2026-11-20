@@ -31,6 +31,7 @@ final class BoardEditor: NSObject, DocumentEditor {
         (.draw, "pencil.tip", "Draw (P or 7)", "7"),
         (.text, "textformat", "Text (T or 8)", "8"),
         (.eraser, "eraser", "Eraser (E or 0)", "0"),
+        (.laser, "cursorarrow.rays", "Laser pointer: a trail that fades away (K)", "K"),
     ]
 
     init(document: Document) {
